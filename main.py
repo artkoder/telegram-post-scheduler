@@ -267,6 +267,7 @@ def create_app():
     return app
 
 
+
 async def init():
     app = create_app()
     app.loop.create_task(app['bot'].schedule_loop())
@@ -276,3 +277,4 @@ async def init():
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 8080))
     web.run_app(init(), port=port)
+

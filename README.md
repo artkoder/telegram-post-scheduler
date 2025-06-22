@@ -31,5 +31,7 @@ fly launch
 fly deploy
 ```
 
+
 ## CI/CD
 Каждый push в main запускает GitHub Actions → flyctl deploy → Fly.io.
+
