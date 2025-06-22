@@ -9,9 +9,6 @@ from aiohttp import web, ClientSession
 
 logging.basicConfig(level=logging.INFO)
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
-
 DB_PATH = "bot.db"
 
 CREATE_TABLES = [
@@ -36,7 +33,8 @@ CREATE_TABLES = [
 
 
 class Bot:
-    def __init__(self, db_path: str):
+    def __init__(self, token: str, db_path: str):
+        self.api_url = f"https://api.telegram.org/bot{token}"
         self.db = sqlite3.connect(db_path)
         self.db.row_factory = sqlite3.Row
         for stmt in CREATE_TABLES:
@@ -46,7 +44,7 @@ class Bot:
         self.session = ClientSession()
 
     async def api_request(self, method: str, data: dict = None):
-        async with self.session.post(f"{API_URL}/{method}", json=data) as resp:
+        async with self.session.post(f"{self.api_url}/{method}", json=data) as resp:
             if resp.status != 200:
                 logging.error("API error: %s", await resp.text())
             return await resp.json()
@@ -259,22 +257,24 @@ async def handle_webhook(request):
     return web.Response(text='ok')
 
 
-def create_app():
-    bot = Bot(DB_PATH)
-    app = web.Application()
-    app['bot'] = bot
-    app.router.add_post('/webhook', handle_webhook)
-    return app
-
-
-
 async def init():
-    app = create_app()
-    app.loop.create_task(app['bot'].schedule_loop())
+    app = web.Application()
+
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN not found in environment variables")
+
+    bot = Bot(token, DB_PATH)
+    app['bot'] = bot
+
+    app.router.add_post('/webhook', handle_webhook)
+
     return app
 
 
 if __name__ == '__main__':
+    app = asyncio.run(init())
+    app.loop.create_task(app['bot'].schedule_loop())
     port = int(os.getenv("PORT", 8080))
-    web.run_app(init(), port=port)
+    web.run_app(app, port=port)
 
