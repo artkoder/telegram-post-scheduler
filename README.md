@@ -13,16 +13,20 @@ The bot is designed for Fly.io using a webhook on `/webhook` and listens on port
 
 ### Environment Variables
 - `TELEGRAM_BOT_TOKEN` – Telegram bot API token.
+- `FLY_API_TOKEN` – token for automated Fly deployments.
 
-### Development
+### Запуск локально
 1. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-2. Run locally:
+2. Запустите бота:
    ```bash
    python main.py
    ```
+
+> Fly.io secrets `TELEGRAM_BOT_TOKEN` и `FLY_API_TOKEN` должны быть заданы перед запуском.
+
 
 ### Деплой на Fly.io
 
@@ -31,6 +35,7 @@ The bot is designed for Fly.io using a webhook on `/webhook` and listens on port
 ```bash
 fly launch
 fly volumes create sched_db --size 1
+
 ```
 
 2. После этого любой push в ветку `main` будет автоматически триггерить деплой.
@@ -40,6 +45,7 @@ fly volumes create sched_db --size 1
 ```bash
 fly secrets set TELEGRAM_BOT_TOKEN=xxx
 ```
+
 
 4. Переменная окружения FLY_API_TOKEN должна быть добавлена в Github репозиторий для работы CI/CD.
 
