@@ -27,6 +27,7 @@ The bot is designed for Fly.io using a webhook on `/webhook` and listens on port
 
 > Fly.io secrets `TELEGRAM_BOT_TOKEN` и `FLY_API_TOKEN` должны быть заданы перед запуском.
 
+
 ### Деплой на Fly.io
 
 1. Запустить приложение в первый раз (из CLI, однократно):
@@ -34,6 +35,7 @@ The bot is designed for Fly.io using a webhook on `/webhook` and listens on port
 ```bash
 fly launch
 fly volumes create sched_db --size 1
+
 ```
 
 2. После этого любой push в ветку `main` будет автоматически триггерить деплой.
@@ -43,6 +45,7 @@ fly volumes create sched_db --size 1
 ```bash
 fly secrets set TELEGRAM_BOT_TOKEN=xxx
 ```
+
 
 4. Переменная окружения FLY_API_TOKEN должна быть добавлена в Github репозиторий для работы CI/CD.
 

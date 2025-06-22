@@ -266,6 +266,7 @@ async def handle_webhook(request):
     await bot.handle_update(data)
     return web.Response(text='ok')
 
+
 def create_app():
     app = web.Application()
 
@@ -290,9 +291,12 @@ def create_app():
     app.on_startup.append(start_background)
     app.on_cleanup.append(cleanup_background)
 
+
     return app
 
 
 if __name__ == '__main__':
+
     web.run_app(create_app(), port=int(os.getenv("PORT", 8080)))
+
 
