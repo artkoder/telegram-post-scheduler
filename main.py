@@ -4,13 +4,11 @@ import logging
 import os
 import sqlite3
 from datetime import datetime, date
+import contextlib
 
 from aiohttp import web, ClientSession
 
 logging.basicConfig(level=logging.INFO)
-
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 DB_PATH = "bot.db"
 
@@ -36,7 +34,8 @@ CREATE_TABLES = [
 
 
 class Bot:
-    def __init__(self, db_path: str):
+    def __init__(self, token: str, db_path: str):
+        self.api_url = f"https://api.telegram.org/bot{token}"
         self.db = sqlite3.connect(db_path)
         self.db.row_factory = sqlite3.Row
         for stmt in CREATE_TABLES:
@@ -44,9 +43,15 @@ class Bot:
         self.db.commit()
         self.pending = {}
         self.session = ClientSession()
+        self.running = True
+
+    async def close(self):
+        self.running = False
+        await self.session.close()
+        self.db.close()
 
     async def api_request(self, method: str, data: dict = None):
-        async with self.session.post(f"{API_URL}/{method}", json=data) as resp:
+        async with self.session.post(f"{self.api_url}/{method}", json=data) as resp:
             if resp.status != 200:
                 logging.error("API error: %s", await resp.text())
             return await resp.json()
@@ -232,24 +237,27 @@ class Bot:
         await self.api_request('answerCallbackQuery', {'callback_query_id': query['id']})
 
     async def schedule_loop(self):
-        while True:
-            now = datetime.utcnow()
-            cur = self.db.execute(
-                'SELECT id, from_chat_id, message_id, target_chat_id FROM schedule '
-                'WHERE sent=0 AND publish_time<=?', (now.isoformat(),))
-            rows = cur.fetchall()
-            for r in rows:
-                await self.api_request('forwardMessage', {
-                    'chat_id': r['target_chat_id'],
-                    'from_chat_id': r['from_chat_id'],
-                    'message_id': r['message_id']
-                })
-                self.db.execute(
-                    'UPDATE schedule SET sent=1, sent_at=? WHERE id=?',
-                    (datetime.utcnow().isoformat(), r['id'])
-                )
-                self.db.commit()
-            await asyncio.sleep(60)
+        try:
+            while self.running:
+                now = datetime.utcnow()
+                cur = self.db.execute(
+                    'SELECT id, from_chat_id, message_id, target_chat_id FROM schedule '
+                    'WHERE sent=0 AND publish_time<=?', (now.isoformat(),))
+                rows = cur.fetchall()
+                for r in rows:
+                    await self.api_request('forwardMessage', {
+                        'chat_id': r['target_chat_id'],
+                        'from_chat_id': r['from_chat_id'],
+                        'message_id': r['message_id']
+                    })
+                    self.db.execute(
+                        'UPDATE schedule SET sent=1, sent_at=? WHERE id=?',
+                        (datetime.utcnow().isoformat(), r['id'])
+                    )
+                    self.db.commit()
+                await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            pass
 
 
 async def handle_webhook(request):
@@ -258,23 +266,33 @@ async def handle_webhook(request):
     await bot.handle_update(data)
     return web.Response(text='ok')
 
-
 def create_app():
-    bot = Bot(DB_PATH)
     app = web.Application()
+
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN not found in environment variables")
+
+    bot = Bot(token, DB_PATH)
     app['bot'] = bot
+
     app.router.add_post('/webhook', handle_webhook)
-    return app
 
+    async def start_background(app: web.Application):
+        app['schedule_task'] = asyncio.create_task(bot.schedule_loop())
 
+    async def cleanup_background(app: web.Application):
+        await bot.close()
+        app['schedule_task'].cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await app['schedule_task']
 
-async def init():
-    app = create_app()
-    app.loop.create_task(app['bot'].schedule_loop())
+    app.on_startup.append(start_background)
+    app.on_cleanup.append(cleanup_background)
+
     return app
 
 
 if __name__ == '__main__':
-    port = int(os.getenv("PORT", 8080))
-    web.run_app(init(), port=port)
+    web.run_app(create_app(), port=int(os.getenv("PORT", 8080)))
 
