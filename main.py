@@ -267,19 +267,14 @@ def create_app():
     return app
 
 
-async def main():
+
+async def init():
     app = create_app()
-    loop = asyncio.get_event_loop()
-    bot: Bot = app['bot']
-    loop.create_task(bot.schedule_loop())
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.getenv('PORT', 8080)))
-    await site.start()
-    logging.info("Bot started")
-    while True:
-        await asyncio.sleep(3600)
+    app.loop.create_task(app['bot'].schedule_loop())
+    return app
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    port = int(os.getenv("PORT", 8080))
+    web.run_app(init(), port=port)
+

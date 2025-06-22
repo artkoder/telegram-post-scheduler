@@ -1,10 +1,18 @@
 app = "telegram-scheduler-bot"
 
 [build]
-  image = "python:3.11-slim"
+
+  dockerfile = "Dockerfile"
+
 
 [env]
   PORT = "8080"
+
+
+[[mounts]]
+  source = "sched_db"
+  destination = "/data"
+
 
 [[services]]
   internal_port = 8080
