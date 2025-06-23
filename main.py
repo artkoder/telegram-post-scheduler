@@ -248,9 +248,19 @@ class Bot:
             })
         await self.api_request('answerCallbackQuery', {'callback_query_id': query['id']})
 
+            logging.info("Scheduler loop started")
 
-    async def schedule_loop(self):
-        """Background scheduler placeholder."""
+    try:
+        data = await request.json()
+        logging.info("Received webhook: %s", data)
+    except Exception:
+        logging.exception("Invalid webhook payload")
+        return web.Response(text='bad request', status=400)
+    try:
+        await bot.handle_update(data)
+    except Exception:
+        logging.exception("Error handling update")
+        return web.Response(text='error', status=500)
         # TODO: implement scheduler
 
         try:

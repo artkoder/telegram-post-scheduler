@@ -10,10 +10,11 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 
 ## Deployment
 The bot is designed for Fly.io using a webhook on `/webhook` and listens on port `8080`.
+For Telegram to reach the webhook over HTTPS, the Fly.io service must expose port `443` with TLS termination enabled. This is configured in `fly.toml`.
 
 ### Environment Variables
 - `TELEGRAM_BOT_TOKEN` – Telegram bot API token.
-- `WEBHOOK_URL` – external URL of the deployed application. Used to register the Telegram webhook.
+- `WEBHOOK_URL` – external HTTPS URL of the deployed application. Used to register the Telegram webhook.
 - `DB_PATH` – path to the SQLite database (default `bot.db`).
 - `FLY_API_TOKEN` – token for automated Fly deployments.
 
@@ -49,6 +50,8 @@ fly volumes create sched_db --size 1
 fly secrets set TELEGRAM_BOT_TOKEN=xxx
 fly secrets set WEBHOOK_URL=https://<app-name>.fly.dev/
 ```
+
+The `fly.toml` file should expose port `443` so that Telegram can connect over HTTPS.
 
 4. Переменная окружения FLY_API_TOKEN должна быть добавлена в Github репозиторий для работы CI/CD.
 
