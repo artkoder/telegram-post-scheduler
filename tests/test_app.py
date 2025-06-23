@@ -26,6 +26,7 @@ async def test_registration_queue(tmp_path):
     bot = Bot("dummy", str(tmp_path / "db.sqlite"))
 
 
+
     calls = []
 
     async def dummy(method, data=None):
@@ -94,3 +95,53 @@ async def test_superadmin_user_management(tmp_path):
     assert not bot.get_user(2)
 
     await bot.close()
+
+
+
+@pytest.mark.asyncio
+async def test_channel_tracking(tmp_path):
+    bot = Bot("dummy", str(tmp_path / "db.sqlite"))
+
+    calls = []
+
+    async def dummy(method, data=None):
+        calls.append((method, data))
+        return {"ok": True}
+
+    bot.api_request = dummy  # type: ignore
+    await bot.start()
+
+    # register superadmin
+    await bot.handle_update({"message": {"text": "/start", "from": {"id": 1}}})
+
+    # bot added to channel
+    await bot.handle_update({
+        "my_chat_member": {
+            "chat": {"id": -100, "title": "Chan"},
+            "new_chat_member": {"status": "administrator"}
+        }
+    })
+    cur = bot.db.execute('SELECT title FROM channels WHERE chat_id=?', (-100,))
+    row = cur.fetchone()
+    assert row and row["title"] == "Chan"
+
+    await bot.handle_update({"message": {"text": "/channels", "from": {"id": 1}}})
+    assert calls[-1][1]["text"] == "Chan (-100)"
+
+    # non-admin cannot list channels
+    await bot.handle_update({"message": {"text": "/start", "from": {"id": 2}}})
+    await bot.handle_update({"message": {"text": "/channels", "from": {"id": 2}}})
+    assert calls[-1][1]["text"] == "Not authorized"
+
+    # bot removed from channel
+    await bot.handle_update({
+        "my_chat_member": {
+            "chat": {"id": -100, "title": "Chan"},
+            "new_chat_member": {"status": "left"}
+        }
+    })
+    cur = bot.db.execute('SELECT * FROM channels WHERE chat_id=?', (-100,))
+    assert cur.fetchone() is None
+
+    await bot.close()
+
