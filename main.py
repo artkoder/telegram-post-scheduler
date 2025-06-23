@@ -249,24 +249,10 @@ class Bot:
         await self.api_request('answerCallbackQuery', {'callback_query_id': query['id']})
 
     async def schedule_loop(self):
+        """Background scheduler placeholder."""
+        # TODO: implement scheduler
         try:
             while self.running:
-                now = datetime.utcnow()
-                cur = self.db.execute(
-                    'SELECT id, from_chat_id, message_id, target_chat_id FROM schedule '
-                    'WHERE sent=0 AND publish_time<=?', (now.isoformat(),))
-                rows = cur.fetchall()
-                for r in rows:
-                    await self.api_request('forwardMessage', {
-                        'chat_id': r['target_chat_id'],
-                        'from_chat_id': r['from_chat_id'],
-                        'message_id': r['message_id']
-                    })
-                    self.db.execute(
-                        'UPDATE schedule SET sent=1, sent_at=? WHERE id=?',
-                        (datetime.utcnow().isoformat(), r['id'])
-                    )
-                    self.db.commit()
                 await asyncio.sleep(60)
         except asyncio.CancelledError:
             pass
