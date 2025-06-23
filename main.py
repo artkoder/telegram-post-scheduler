@@ -248,9 +248,11 @@ class Bot:
             })
         await self.api_request('answerCallbackQuery', {'callback_query_id': query['id']})
 
+
     async def schedule_loop(self):
         """Background scheduler placeholder."""
         # TODO: implement scheduler
+
         try:
             logging.info("Scheduler loop started")
             while self.running:
