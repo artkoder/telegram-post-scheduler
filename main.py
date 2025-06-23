@@ -53,6 +53,7 @@ class Bot:
         self.running = False
         if self.session:
             await self.session.close()
+
         self.db.close()
 
     async def api_request(self, method: str, data: dict = None):
@@ -284,7 +285,9 @@ def create_app():
     app.router.add_post('/webhook', handle_webhook)
 
     async def start_background(app: web.Application):
+
         await bot.start()
+
         app['schedule_task'] = asyncio.create_task(bot.schedule_loop())
 
     async def cleanup_background(app: web.Application):
@@ -293,6 +296,7 @@ def create_app():
         with contextlib.suppress(asyncio.CancelledError):
             await app['schedule_task']
 
+
     app.on_startup.append(start_background)
     app.on_cleanup.append(cleanup_background)
 
@@ -300,5 +304,7 @@ def create_app():
 
 
 if __name__ == '__main__':
+
     web.run_app(create_app(), port=int(os.getenv("PORT", 8080)))
+
 
