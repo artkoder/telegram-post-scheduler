@@ -99,21 +99,26 @@ class Bot:
 
         # first /start registers superadmin
         if text.startswith('/start'):
-            if not self.get_user(user_id):
-                self.db.execute(
-                    'INSERT INTO users (user_id, is_superadmin) VALUES (?, 1)',
-                    (user_id,)
-                )
-                self.db.commit()
-                await self.api_request('sendMessage', {
-                    'chat_id': user_id,
-                    'text': 'You are superadmin'
-                })
-            else:
-                await self.api_request('sendMessage', {
-                    'chat_id': user_id,
-                    'text': 'Bot is running'
-                })
+            # Previous registration logic preserved for future use:
+            # if not self.get_user(user_id):
+            #     self.db.execute(
+            #         'INSERT INTO users (user_id, is_superadmin) VALUES (?, 1)',
+            #         (user_id,)
+            #     )
+            #     self.db.commit()
+            #     await self.api_request('sendMessage', {
+            #         'chat_id': user_id,
+            #         'text': 'You are superadmin'
+            #     })
+            # else:
+            #     await self.api_request('sendMessage', {
+            #         'chat_id': user_id,
+            #         'text': 'Bot is running'
+            #     })
+            await self.api_request('sendMessage', {
+                'chat_id': user_id,
+                'text': 'Bot is working'
+            })
             return
 
         if text.startswith('/add_user') and self.is_superadmin(user_id):
@@ -243,7 +248,7 @@ class Bot:
             })
         await self.api_request('answerCallbackQuery', {'callback_query_id': query['id']})
 
-async def schedule_loop(self):
+    async def schedule_loop(self):
         try:
             while self.running:
                 now = datetime.utcnow()
