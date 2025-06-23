@@ -10,7 +10,8 @@ from aiohttp import web, ClientSession
 
 logging.basicConfig(level=logging.INFO)
 
-DB_PATH = "bot.db"
+DB_PATH = os.getenv("DB_PATH", "bot.db")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://telegram-post-scheduler.fly.dev")
 
 CREATE_TABLES = [
     """CREATE TABLE IF NOT EXISTS users (
@@ -98,21 +99,26 @@ class Bot:
 
         # first /start registers superadmin
         if text.startswith('/start'):
-            if not self.get_user(user_id):
-                self.db.execute(
-                    'INSERT INTO users (user_id, is_superadmin) VALUES (?, 1)',
-                    (user_id,)
-                )
-                self.db.commit()
-                await self.api_request('sendMessage', {
-                    'chat_id': user_id,
-                    'text': 'You are superadmin'
-                })
-            else:
-                await self.api_request('sendMessage', {
-                    'chat_id': user_id,
-                    'text': 'Bot is running'
-                })
+            # Previous registration logic preserved for future use:
+            # if not self.get_user(user_id):
+            #     self.db.execute(
+            #         'INSERT INTO users (user_id, is_superadmin) VALUES (?, 1)',
+            #         (user_id,)
+            #     )
+            #     self.db.commit()
+            #     await self.api_request('sendMessage', {
+            #         'chat_id': user_id,
+            #         'text': 'You are superadmin'
+            #     })
+            # else:
+            #     await self.api_request('sendMessage', {
+            #         'chat_id': user_id,
+            #         'text': 'Bot is running'
+            #     })
+            await self.api_request('sendMessage', {
+                'chat_id': user_id,
+                'text': 'Bot is working'
+            })
             return
 
         if text.startswith('/add_user') and self.is_superadmin(user_id):
@@ -243,28 +249,28 @@ class Bot:
         await self.api_request('answerCallbackQuery', {'callback_query_id': query['id']})
 
     async def schedule_loop(self):
+        """Background scheduler placeholder."""
+        # TODO: implement scheduler
         try:
             while self.running:
-                now = datetime.utcnow()
-                cur = self.db.execute(
-                    'SELECT id, from_chat_id, message_id, target_chat_id FROM schedule '
-                    'WHERE sent=0 AND publish_time<=?', (now.isoformat(),))
-                rows = cur.fetchall()
-                for r in rows:
-                    await self.api_request('forwardMessage', {
-                        'chat_id': r['target_chat_id'],
-                        'from_chat_id': r['from_chat_id'],
-                        'message_id': r['message_id']
-                    })
-                    self.db.execute(
-                        'UPDATE schedule SET sent=1, sent_at=? WHERE id=?',
-                        (datetime.utcnow().isoformat(), r['id'])
-                    )
-                    self.db.commit()
                 await asyncio.sleep(60)
         except asyncio.CancelledError:
             pass
 
+
+async def ensure_webhook(bot: Bot, base_url: str):
+    expected = base_url.rstrip('/') + '/webhook'
+    info = await bot.api_request('getWebhookInfo')
+    current = info.get('result', {}).get('url')
+    if current != expected:
+        logging.info('Registering webhook %s', expected)
+        resp = await bot.api_request('setWebhook', {'url': expected})
+        if not resp.get('ok'):
+            logging.error('Failed to register webhook: %s', resp)
+            raise RuntimeError(f"Webhook registration failed: {resp}")
+        logging.info('Webhook registered successfully')
+    else:
+        logging.info('Webhook already registered at %s', current)
 
 async def handle_webhook(request):
     bot: Bot = request.app['bot']
@@ -284,10 +290,16 @@ def create_app():
 
     app.router.add_post('/webhook', handle_webhook)
 
+    webhook_base = WEBHOOK_URL
+
     async def start_background(app: web.Application):
-
-        await bot.start()
-
+        logging.info("Application startup")
+        try:
+            await bot.start()
+            await ensure_webhook(bot, webhook_base)
+        except Exception:
+            logging.exception("Error during startup")
+            raise
         app['schedule_task'] = asyncio.create_task(bot.schedule_loop())
 
     async def cleanup_background(app: web.Application):
