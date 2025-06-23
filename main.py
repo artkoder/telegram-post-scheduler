@@ -254,6 +254,7 @@ class Bot:
         # TODO: implement scheduler
 
         try:
+            logging.info("Scheduler loop started")
             while self.running:
                 await asyncio.sleep(60)
         except asyncio.CancelledError:
@@ -276,8 +277,17 @@ async def ensure_webhook(bot: Bot, base_url: str):
 
 async def handle_webhook(request):
     bot: Bot = request.app['bot']
-    data = await request.json()
-    await bot.handle_update(data)
+    try:
+        data = await request.json()
+        logging.info("Received webhook: %s", data)
+    except Exception:
+        logging.exception("Invalid webhook payload")
+        return web.Response(text='bad request', status=400)
+    try:
+        await bot.handle_update(data)
+    except Exception:
+        logging.exception("Error handling update")
+        return web.Response(text='error', status=500)
     return web.Response(text='ok')
 
 def create_app():
