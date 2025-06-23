@@ -89,6 +89,10 @@ class Bot:
             )
             self.db.commit()
             logging.info("Added channel %s", chat['id'])
+        else:
+            self.db.execute('DELETE FROM channels WHERE chat_id=?', (chat['id'],))
+            self.db.commit()
+            logging.info("Removed channel %s", chat['id'])
 
     def get_user(self, user_id):
         cur = self.db.execute('SELECT * FROM users WHERE user_id=?', (user_id,))
@@ -247,7 +251,7 @@ class Bot:
                         {'text': 'Reject', 'callback_data': f'reject:{r["user_id"]}'}
                     ]
                     for r in rows
-                ]
+        if text.startswith('/channels') and self.is_superadmin(user_id):
             }
             await self.api_request('sendMessage', {
                 'chat_id': user_id,
