@@ -42,12 +42,17 @@ class Bot:
             self.db.execute(stmt)
         self.db.commit()
         self.pending = {}
+        self.session: ClientSession | None = None
+        self.running = False
+
+    async def start(self):
         self.session = ClientSession()
         self.running = True
 
     async def close(self):
         self.running = False
-        await self.session.close()
+        if self.session:
+            await self.session.close()
         self.db.close()
 
     async def api_request(self, method: str, data: dict = None):
@@ -267,6 +272,7 @@ async def handle_webhook(request):
     return web.Response(text='ok')
 
 
+        await bot.start()
 def create_app():
     app = web.Application()
 
