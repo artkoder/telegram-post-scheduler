@@ -98,6 +98,23 @@ class Bot:
         cur = self.db.execute('SELECT COUNT(*) FROM pending_users')
         return cur.fetchone()[0]
 
+    def approve_user(self, uid: int) -> bool:
+        if not self.is_pending(uid):
+            return False
+        self.db.execute('DELETE FROM pending_users WHERE user_id=?', (uid,))
+        self.db.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (uid,))
+        self.db.commit()
+        logging.info('Approved user %s', uid)
+        return True
+
+    def reject_user(self, uid: int) -> bool:
+        if not self.is_pending(uid):
+            return False
+        self.db.execute('DELETE FROM pending_users WHERE user_id=?', (uid,))
+        self.db.commit()
+        logging.info('Rejected user %s', uid)
+        return True
+
     def is_authorized(self, user_id):
         return self.get_user(user_id) is not None
 
@@ -187,6 +204,33 @@ class Bot:
             rows = cur.fetchall()
             msg = '\n'.join(f"{r['user_id']} {'(admin)' if r['is_superadmin'] else ''}" for r in rows)
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No users'})
+            return
+
+        if text.startswith('/pending') and self.is_superadmin(user_id):
+            cur = self.db.execute('SELECT user_id, requested_at FROM pending_users')
+            rows = cur.fetchall()
+            msg = '\n'.join(f"{r['user_id']} requested {r['requested_at']}" for r in rows)
+            await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No pending users'})
+            return
+
+        if text.startswith('/approve') and self.is_superadmin(user_id):
+            parts = text.split()
+            if len(parts) == 2:
+                uid = int(parts[1])
+                if self.approve_user(uid):
+                    await self.api_request('sendMessage', {'chat_id': user_id, 'text': f'User {uid} approved'})
+                else:
+                    await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
+            return
+
+        if text.startswith('/reject') and self.is_superadmin(user_id):
+            parts = text.split()
+            if len(parts) == 2:
+                uid = int(parts[1])
+                if self.reject_user(uid):
+                    await self.api_request('sendMessage', {'chat_id': user_id, 'text': f'User {uid} rejected'})
+                else:
+                    await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
             return
 
         if text.startswith('/channels'):
