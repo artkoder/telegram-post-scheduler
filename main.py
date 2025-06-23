@@ -42,12 +42,18 @@ class Bot:
             self.db.execute(stmt)
         self.db.commit()
         self.pending = {}
+        self.session: ClientSession | None = None
+        self.running = False
+
+    async def start(self):
         self.session = ClientSession()
         self.running = True
 
     async def close(self):
         self.running = False
-        await self.session.close()
+        if self.session:
+            await self.session.close()
+
         self.db.close()
 
     async def api_request(self, method: str, data: dict = None):
@@ -266,7 +272,6 @@ async def handle_webhook(request):
     await bot.handle_update(data)
     return web.Response(text='ok')
 
-
 def create_app():
     app = web.Application()
 
@@ -280,6 +285,9 @@ def create_app():
     app.router.add_post('/webhook', handle_webhook)
 
     async def start_background(app: web.Application):
+
+        await bot.start()
+
         app['schedule_task'] = asyncio.create_task(bot.schedule_loop())
 
     async def cleanup_background(app: web.Application):
@@ -288,9 +296,9 @@ def create_app():
         with contextlib.suppress(asyncio.CancelledError):
             await app['schedule_task']
 
+
     app.on_startup.append(start_background)
     app.on_cleanup.append(cleanup_background)
-
 
     return app
 

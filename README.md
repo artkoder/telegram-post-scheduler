@@ -36,6 +36,7 @@ The bot is designed for Fly.io using a webhook on `/webhook` and listens on port
 fly launch
 fly volumes create sched_db --size 1
 
+
 ```
 
 2. После этого любой push в ветку `main` будет автоматически триггерить деплой.
@@ -45,6 +46,8 @@ fly volumes create sched_db --size 1
 ```bash
 fly secrets set TELEGRAM_BOT_TOKEN=xxx
 ```
+
+4. Переменная окружения FLY_API_TOKEN должна быть добавлена в Github репозиторий для работы CI/CD.
 
 
 4. Переменная окружения FLY_API_TOKEN должна быть добавлена в Github репозиторий для работы CI/CD.
