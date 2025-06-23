@@ -22,6 +22,10 @@ CREATE_TABLES = [
             user_id INTEGER PRIMARY KEY,
             requested_at TEXT
         )""",
+    """CREATE TABLE IF NOT EXISTS rejected_users (
+            user_id INTEGER PRIMARY KEY,
+            rejected_at TEXT
+        )""",
     """CREATE TABLE IF NOT EXISTS channels (
             chat_id INTEGER PRIMARY KEY,
             title TEXT
@@ -103,6 +107,7 @@ class Bot:
             return False
         self.db.execute('DELETE FROM pending_users WHERE user_id=?', (uid,))
         self.db.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (uid,))
+        self.db.execute('DELETE FROM rejected_users WHERE user_id=?', (uid,))
         self.db.commit()
         logging.info('Approved user %s', uid)
         return True
@@ -111,10 +116,25 @@ class Bot:
         if not self.is_pending(uid):
             return False
         self.db.execute('DELETE FROM pending_users WHERE user_id=?', (uid,))
+        self.db.execute(
+            'INSERT OR REPLACE INTO rejected_users (user_id, rejected_at) VALUES (?, ?)',
+            (uid, datetime.utcnow().isoformat()),
+        )
         self.db.commit()
         logging.info('Rejected user %s', uid)
         return True
 
+    def is_rejected(self, user_id: int) -> bool:
+        cur = self.db.execute('SELECT 1 FROM rejected_users WHERE user_id=?', (user_id,))
+        return cur.fetchone() is not None
+
+
+            if self.is_rejected(user_id):
+                await self.api_request('sendMessage', {
+                    'chat_id': user_id,
+                    'text': 'Access denied by administrator'
+                })
+                return
 
     def is_authorized(self, user_id):
         return self.get_user(user_id) is not None
@@ -184,7 +204,26 @@ class Bot:
                     self.db.commit()
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
-                    'text': f'User {uid} added'
+            if not rows:
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'No pending users'})
+                return
+
+            keyboard = {
+                'inline_keyboard': [
+                    [
+                        {'text': 'Approve', 'callback_data': f'approve:{r["user_id"]}'},
+                        {'text': 'Reject', 'callback_data': f'reject:{r["user_id"]}'}
+                    ]
+                    for r in rows
+                ]
+            }
+            await self.api_request('sendMessage', {
+                'chat_id': user_id,
+                'text': msg,
+                'reply_markup': keyboard
+            })
+                    await self.api_request('sendMessage', {'chat_id': uid, 'text': 'You are approved'})
+                    await self.api_request('sendMessage', {'chat_id': uid, 'text': 'Your registration was rejected'})
                 })
             return
 
@@ -301,6 +340,20 @@ class Bot:
             }
             self.pending[user_id] = {
                 'from_chat_id': from_chat,
+        elif data.startswith('approve:') and self.is_superadmin(user_id):
+            uid = int(data.split(':')[1])
+            if self.approve_user(uid):
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': f'User {uid} approved'})
+                await self.api_request('sendMessage', {'chat_id': uid, 'text': 'You are approved'})
+            else:
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
+        elif data.startswith('reject:') and self.is_superadmin(user_id):
+            uid = int(data.split(':')[1])
+            if self.reject_user(uid):
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': f'User {uid} rejected'})
+                await self.api_request('sendMessage', {'chat_id': uid, 'text': 'Your registration was rejected'})
+            else:
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
                 'message_id': msg_id
             }
             await self.api_request('sendMessage', {
