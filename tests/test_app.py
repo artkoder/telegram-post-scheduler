@@ -4,13 +4,38 @@ import pytest
 from aiohttp import web
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from main import create_app
+from main import create_app, Bot
 
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "dummy")
 
 @pytest.mark.asyncio
 async def test_startup_cleanup():
     app = create_app()
+
+    async def dummy(method, data=None):
+        return {"ok": True}
+
+    app['bot'].api_request = dummy  # type: ignore
+
     runner = web.AppRunner(app)
     await runner.setup()
     await runner.cleanup()
+
+@pytest.mark.asyncio
+async def test_registration_queue(tmp_path):
+    bot = Bot("dummy", str(tmp_path / "db.sqlite"))
+
+    async def dummy(method, data=None):
+        return {"ok": True}
+
+    bot.api_request = dummy  # type: ignore
+    await bot.start()
+
+    await bot.handle_update({"message": {"text": "/start", "from": {"id": 1}}})
+    row = bot.get_user(1)
+    assert row and row["is_superadmin"] == 1
+
+    await bot.handle_update({"message": {"text": "/start", "from": {"id": 2}}})
+    assert bot.is_pending(2)
+
+    await bot.close()

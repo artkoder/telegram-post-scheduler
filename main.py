@@ -18,6 +18,10 @@ CREATE_TABLES = [
             user_id INTEGER PRIMARY KEY,
             is_superadmin INTEGER DEFAULT 0
         )""",
+    """CREATE TABLE IF NOT EXISTS pending_users (
+            user_id INTEGER PRIMARY KEY,
+            requested_at TEXT
+        )""",
     """CREATE TABLE IF NOT EXISTS channels (
             chat_id INTEGER PRIMARY KEY,
             title TEXT
@@ -86,6 +90,14 @@ class Bot:
         cur = self.db.execute('SELECT * FROM users WHERE user_id=?', (user_id,))
         return cur.fetchone()
 
+    def is_pending(self, user_id: int) -> bool:
+        cur = self.db.execute('SELECT 1 FROM pending_users WHERE user_id=?', (user_id,))
+        return cur.fetchone() is not None
+
+    def pending_count(self) -> int:
+        cur = self.db.execute('SELECT COUNT(*) FROM pending_users')
+        return cur.fetchone()[0]
+
     def is_authorized(self, user_id):
         return self.get_user(user_id) is not None
 
@@ -97,27 +109,51 @@ class Bot:
         text = message.get('text', '')
         user_id = message['from']['id']
 
-        # first /start registers superadmin
+        # first /start registers superadmin or puts user in queue
         if text.startswith('/start'):
-            # Previous registration logic preserved for future use:
-            # if not self.get_user(user_id):
-            #     self.db.execute(
-            #         'INSERT INTO users (user_id, is_superadmin) VALUES (?, 1)',
-            #         (user_id,)
-            #     )
-            #     self.db.commit()
-            #     await self.api_request('sendMessage', {
-            #         'chat_id': user_id,
-            #         'text': 'You are superadmin'
-            #     })
-            # else:
-            #     await self.api_request('sendMessage', {
-            #         'chat_id': user_id,
-            #         'text': 'Bot is running'
-            #     })
+            if self.get_user(user_id):
+                await self.api_request('sendMessage', {
+                    'chat_id': user_id,
+                    'text': 'Bot is working'
+                })
+                return
+
+            if self.is_pending(user_id):
+                await self.api_request('sendMessage', {
+                    'chat_id': user_id,
+                    'text': 'Awaiting approval'
+                })
+                return
+
+            cur = self.db.execute('SELECT COUNT(*) FROM users')
+            user_count = cur.fetchone()[0]
+            if user_count == 0:
+                self.db.execute('INSERT INTO users (user_id, is_superadmin) VALUES (?, 1)', (user_id,))
+                self.db.commit()
+                logging.info('Registered %s as superadmin', user_id)
+                await self.api_request('sendMessage', {
+                    'chat_id': user_id,
+                    'text': 'You are superadmin'
+                })
+                return
+
+            if self.pending_count() >= 10:
+                await self.api_request('sendMessage', {
+                    'chat_id': user_id,
+                    'text': 'Registration queue full, try later'
+                })
+                logging.info('Registration rejected for %s due to full queue', user_id)
+                return
+
+            self.db.execute(
+                'INSERT OR IGNORE INTO pending_users (user_id, requested_at) VALUES (?, ?)',
+                (user_id, datetime.utcnow().isoformat())
+            )
+            self.db.commit()
+            logging.info('User %s added to pending queue', user_id)
             await self.api_request('sendMessage', {
                 'chat_id': user_id,
-                'text': 'Bot is working'
+                'text': 'Registration pending approval'
             })
             return
 
