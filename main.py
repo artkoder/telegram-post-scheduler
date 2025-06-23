@@ -22,6 +22,10 @@ CREATE_TABLES = [
             user_id INTEGER PRIMARY KEY,
             requested_at TEXT
         )""",
+    """CREATE TABLE IF NOT EXISTS rejected_users (
+            user_id INTEGER PRIMARY KEY,
+            rejected_at TEXT
+        )""",
     """CREATE TABLE IF NOT EXISTS channels (
             chat_id INTEGER PRIMARY KEY,
             title TEXT
@@ -103,6 +107,9 @@ class Bot:
             return False
         self.db.execute('DELETE FROM pending_users WHERE user_id=?', (uid,))
         self.db.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (uid,))
+
+        self.db.execute('DELETE FROM rejected_users WHERE user_id=?', (uid,))
+
         self.db.commit()
         logging.info('Approved user %s', uid)
         return True
@@ -111,9 +118,18 @@ class Bot:
         if not self.is_pending(uid):
             return False
         self.db.execute('DELETE FROM pending_users WHERE user_id=?', (uid,))
+
+        self.db.execute(
+            'INSERT OR REPLACE INTO rejected_users (user_id, rejected_at) VALUES (?, ?)',
+            (uid, datetime.utcnow().isoformat()),
+        )
         self.db.commit()
         logging.info('Rejected user %s', uid)
         return True
+
+    def is_rejected(self, user_id: int) -> bool:
+        cur = self.db.execute('SELECT 1 FROM rejected_users WHERE user_id=?', (user_id,))
+        return cur.fetchone() is not None
 
 
     def is_authorized(self, user_id):
@@ -135,6 +151,14 @@ class Bot:
                     'text': 'Bot is working'
                 })
                 return
+
+            if self.is_rejected(user_id):
+                await self.api_request('sendMessage', {
+                    'chat_id': user_id,
+                    'text': 'Access denied by administrator'
+                })
+                return
+
 
             if self.is_pending(user_id):
                 await self.api_request('sendMessage', {
@@ -210,8 +234,27 @@ class Bot:
         if text.startswith('/pending') and self.is_superadmin(user_id):
             cur = self.db.execute('SELECT user_id, requested_at FROM pending_users')
             rows = cur.fetchall()
+
+            if not rows:
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'No pending users'})
+                return
+
             msg = '\n'.join(f"{r['user_id']} requested {r['requested_at']}" for r in rows)
-            await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No pending users'})
+            keyboard = {
+                'inline_keyboard': [
+                    [
+                        {'text': 'Approve', 'callback_data': f'approve:{r["user_id"]}'},
+                        {'text': 'Reject', 'callback_data': f'reject:{r["user_id"]}'}
+                    ]
+                    for r in rows
+                ]
+            }
+            await self.api_request('sendMessage', {
+                'chat_id': user_id,
+                'text': msg,
+                'reply_markup': keyboard
+            })
+
             return
 
         if text.startswith('/approve') and self.is_superadmin(user_id):
@@ -220,6 +263,8 @@ class Bot:
                 uid = int(parts[1])
                 if self.approve_user(uid):
                     await self.api_request('sendMessage', {'chat_id': user_id, 'text': f'User {uid} approved'})
+                    await self.api_request('sendMessage', {'chat_id': uid, 'text': 'You are approved'})
+
                 else:
                     await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
             return
@@ -230,6 +275,9 @@ class Bot:
                 uid = int(parts[1])
                 if self.reject_user(uid):
                     await self.api_request('sendMessage', {'chat_id': user_id, 'text': f'User {uid} rejected'})
+
+                    await self.api_request('sendMessage', {'chat_id': uid, 'text': 'Your registration was rejected'})
+
                 else:
                     await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
             return
@@ -327,6 +375,20 @@ class Bot:
                 'chat_id': user_id,
                 'text': 'Enter time (HH:MM or DD.MM.YYYY HH:MM)'
             })
+        elif data.startswith('approve:') and self.is_superadmin(user_id):
+            uid = int(data.split(':')[1])
+            if self.approve_user(uid):
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': f'User {uid} approved'})
+                await self.api_request('sendMessage', {'chat_id': uid, 'text': 'You are approved'})
+            else:
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
+        elif data.startswith('reject:') and self.is_superadmin(user_id):
+            uid = int(data.split(':')[1])
+            if self.reject_user(uid):
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': f'User {uid} rejected'})
+                await self.api_request('sendMessage', {'chat_id': uid, 'text': 'Your registration was rejected'})
+            else:
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
         await self.api_request('answerCallbackQuery', {'callback_query_id': query['id']})
 
 

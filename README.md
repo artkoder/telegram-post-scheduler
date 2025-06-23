@@ -13,7 +13,9 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 ### Done
 - **US-1**: Registration of the first superadmin.
 - **US-2**: User registration queue with limits and admin approval flow.
-- **US-3**: Superadmin manages pending and approved users.
+- **US-3**: Superadmin manages pending and approved users. Rejected users cannot
+  register again and pending users are shown with inline approval buttons.
+
 
 ### In Progress
 - **US-4**: Channel listener events and `/channels` command.
