@@ -19,6 +19,7 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 - **US-4**: Channel listener events and `/channels` command.
 
 ### Planned
+
 - **US-5**: Post scheduling interface.
 - **US-6**: Background scheduler to publish messages.
 - **US-7**: Logging of all operations.

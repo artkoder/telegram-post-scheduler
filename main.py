@@ -115,6 +115,7 @@ class Bot:
         logging.info('Rejected user %s', uid)
         return True
 
+
     def is_authorized(self, user_id):
         return self.get_user(user_id) is not None
 

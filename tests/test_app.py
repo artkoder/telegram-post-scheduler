@@ -69,3 +69,4 @@ async def test_superadmin_user_management(tmp_path):
     assert not bot.get_user(2)
 
     await bot.close()
+
