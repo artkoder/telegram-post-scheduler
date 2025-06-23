@@ -10,7 +10,8 @@ from aiohttp import web, ClientSession
 
 logging.basicConfig(level=logging.INFO)
 
-DB_PATH = "bot.db"
+DB_PATH = os.getenv("DB_PATH", "bot.db")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://telegram-post-scheduler.fly.dev")
 
 CREATE_TABLES = [
     """CREATE TABLE IF NOT EXISTS users (
@@ -242,7 +243,7 @@ class Bot:
             })
         await self.api_request('answerCallbackQuery', {'callback_query_id': query['id']})
 
-    async def schedule_loop(self):
+async def schedule_loop(self):
         try:
             while self.running:
                 now = datetime.utcnow()
@@ -266,6 +267,20 @@ class Bot:
             pass
 
 
+async def ensure_webhook(bot: Bot, base_url: str):
+    expected = base_url.rstrip('/') + '/webhook'
+    info = await bot.api_request('getWebhookInfo')
+    current = info.get('result', {}).get('url')
+    if current != expected:
+        logging.info('Registering webhook %s', expected)
+        resp = await bot.api_request('setWebhook', {'url': expected})
+        if not resp.get('ok'):
+            logging.error('Failed to register webhook: %s', resp)
+            raise RuntimeError(f"Webhook registration failed: {resp}")
+        logging.info('Webhook registered successfully')
+    else:
+        logging.info('Webhook already registered at %s', current)
+
 async def handle_webhook(request):
     bot: Bot = request.app['bot']
     data = await request.json()
@@ -284,10 +299,16 @@ def create_app():
 
     app.router.add_post('/webhook', handle_webhook)
 
+    webhook_base = WEBHOOK_URL
+
     async def start_background(app: web.Application):
-
-        await bot.start()
-
+        logging.info("Application startup")
+        try:
+            await bot.start()
+            await ensure_webhook(bot, webhook_base)
+        except Exception:
+            logging.exception("Error during startup")
+            raise
         app['schedule_task'] = asyncio.create_task(bot.schedule_loop())
 
     async def cleanup_background(app: web.Application):
