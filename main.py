@@ -19,6 +19,7 @@ CREATE_TABLES = [
     """CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             username TEXT,
+
             is_superadmin INTEGER DEFAULT 0,
             tz_offset TEXT
         )""",
@@ -31,6 +32,7 @@ CREATE_TABLES = [
             user_id INTEGER PRIMARY KEY,
             username TEXT,
             rejected_at TEXT
+
         )""",
     """CREATE TABLE IF NOT EXISTS channels (
             chat_id INTEGER PRIMARY KEY,
@@ -59,7 +61,9 @@ class Bot:
         # ensure new columns exist when upgrading
         for table, column in (
             ("users", "username"),
+
             ("users", "tz_offset"),
+
             ("pending_users", "username"),
             ("rejected_users", "username"),
         ):
@@ -137,10 +141,12 @@ class Bot:
     def approve_user(self, uid: int) -> bool:
         if not self.is_pending(uid):
             return False
+
         cur = self.db.execute('SELECT username FROM pending_users WHERE user_id=?', (uid,))
         row = cur.fetchone()
         username = row['username'] if row else None
         self.db.execute('DELETE FROM pending_users WHERE user_id=?', (uid,))
+
         self.db.execute(
             'INSERT OR IGNORE INTO users (user_id, username, tz_offset) VALUES (?, ?, ?)',
             (uid, username, TZ_OFFSET)
@@ -148,6 +154,7 @@ class Bot:
         if username:
             self.db.execute('UPDATE users SET username=? WHERE user_id=?', (username, uid))
         self.db.execute('DELETE FROM rejected_users WHERE user_id=?', (uid,))
+
         self.db.commit()
         logging.info('Approved user %s', uid)
         return True
@@ -155,6 +162,7 @@ class Bot:
     def reject_user(self, uid: int) -> bool:
         if not self.is_pending(uid):
             return False
+
         cur = self.db.execute('SELECT username FROM pending_users WHERE user_id=?', (uid,))
         row = cur.fetchone()
         username = row['username'] if row else None
@@ -162,6 +170,7 @@ class Bot:
         self.db.execute(
             'INSERT OR REPLACE INTO rejected_users (user_id, username, rejected_at) VALUES (?, ?, ?)',
             (uid, username, datetime.utcnow().isoformat()),
+
         )
         self.db.commit()
         logging.info('Rejected user %s', uid)
@@ -173,8 +182,10 @@ class Bot:
 
     def list_scheduled(self):
         cur = self.db.execute(
+
             'SELECT id, target_chat_id, publish_time, from_chat_id, message_id '
             'FROM schedule WHERE sent=0 ORDER BY publish_time'
+
         )
         return cur.fetchall()
 
@@ -202,6 +213,7 @@ class Bot:
         label = f"@{username}" if username else str(user_id)
         return f"[{label}](tg://user?id={user_id})"
 
+
     @staticmethod
     def parse_offset(offset: str) -> timedelta:
         sign = -1 if offset.startswith('-') else 1
@@ -217,6 +229,7 @@ class Bot:
         cur = self.db.execute('SELECT tz_offset FROM users WHERE user_id=?', (user_id,))
         row = cur.fetchone()
         return row['tz_offset'] if row and row['tz_offset'] else TZ_OFFSET
+
 
     def is_authorized(self, user_id):
         return self.get_user(user_id) is not None
@@ -246,6 +259,7 @@ class Bot:
                 })
                 return
 
+
             if self.is_pending(user_id):
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
@@ -256,7 +270,9 @@ class Bot:
             cur = self.db.execute('SELECT COUNT(*) FROM users')
             user_count = cur.fetchone()[0]
             if user_count == 0:
+
                 self.db.execute('INSERT INTO users (user_id, username, is_superadmin, tz_offset) VALUES (?, ?, 1, ?)', (user_id, username, TZ_OFFSET))
+
                 self.db.commit()
                 logging.info('Registered %s as superadmin', user_id)
                 await self.api_request('sendMessage', {
@@ -274,8 +290,10 @@ class Bot:
                 return
 
             self.db.execute(
+
                 'INSERT OR IGNORE INTO pending_users (user_id, username, requested_at) VALUES (?, ?, ?)',
                 (user_id, username, datetime.utcnow().isoformat())
+
             )
             self.db.commit()
             logging.info('User %s added to pending queue', user_id)
@@ -330,6 +348,7 @@ class Bot:
 
         if text.startswith('/list_users') and self.is_superadmin(user_id):
             cur = self.db.execute('SELECT user_id, username, is_superadmin FROM users')
+
             rows = cur.fetchall()
             msg = '\n'.join(
                 f"{self.format_user(r['user_id'], r['username'])} {'(admin)' if r['is_superadmin'] else ''}"
@@ -340,6 +359,7 @@ class Bot:
                 'text': msg or 'No users',
                 'parse_mode': 'Markdown'
             })
+
             return
 
         if text.startswith('/pending') and self.is_superadmin(user_id):
@@ -388,6 +408,7 @@ class Bot:
                     await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
             return
 
+
         if text.startswith('/reject') and self.is_superadmin(user_id):
             parts = text.split()
             if len(parts) == 2:
@@ -407,6 +428,7 @@ class Bot:
             return
 
         if text.startswith('/channels') and self.is_superadmin(user_id):
+
             cur = self.db.execute('SELECT chat_id, title FROM channels')
             rows = cur.fetchall()
             msg = '\n'.join(f"{r['title']} ({r['chat_id']})" for r in rows)
@@ -418,9 +440,11 @@ class Bot:
                 'SELECT target_chat_id, sent_at FROM schedule WHERE sent=1 ORDER BY sent_at DESC LIMIT 10'
             )
             rows = cur.fetchall()
+
             offset = self.get_tz_offset(user_id)
             msg = '\n'.join(
                 f"{r['target_chat_id']} at {self.format_time(r['sent_at'], offset)}"
+
                 for r in rows
             )
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No history'})
@@ -431,16 +455,19 @@ class Bot:
             if not rows:
                 await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'No scheduled posts'})
                 return
+
             offset = self.get_tz_offset(user_id)
             for r in rows:
                 ok = False
                 try:
                     resp = await self.api_request('forwardMessage', {
+
                         'chat_id': user_id,
                         'from_chat_id': r['from_chat_id'],
                         'message_id': r['message_id']
                     })
                     ok = resp.get('ok', False)
+
                     if not ok and resp.get('error_code') == 400 and 'not' in resp.get('description', '').lower():
                         resp = await self.api_request('copyMessage', {
                             'chat_id': user_id,
@@ -450,6 +477,7 @@ class Bot:
                         ok = resp.get('ok', False)
                 except Exception:
                     logging.exception('Failed to forward message %s', r['id'])
+
                 if not ok:
                     link = None
                     if str(r['from_chat_id']).startswith('-100'):
@@ -467,9 +495,11 @@ class Bot:
                 }
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
+
                     'text': f"{r['id']}: {r['target_chat_id']} at {self.format_time(r['publish_time'], offset)}",
                     'reply_markup': keyboard
                 })
+
             return
 
         # handle time input for scheduling
@@ -497,12 +527,14 @@ class Bot:
                 return
             data = self.pending.pop(user_id)
             if 'reschedule_id' in data:
+
                 self.update_schedule_time(data['reschedule_id'], pub_time_utc.isoformat())
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
                     'text': f'Rescheduled for {self.format_time(pub_time_utc.isoformat(), offset)}'
                 })
             else:
+
                 test = await self.api_request(
                     'forwardMessage',
                     {
@@ -517,10 +549,12 @@ class Bot:
                         'text': f"Add the bot to channel {data['from_chat_id']} (reader role) first"
                     })
                     return
+
                 self.add_schedule(data['from_chat_id'], data['message_id'], data['selected'], pub_time_utc.isoformat())
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
                     'text': f"Scheduled to {len(data['selected'])} channels for {self.format_time(pub_time_utc.isoformat(), offset)}"
+
                 })
             return
 
@@ -569,6 +603,7 @@ class Bot:
         data = query['data']
         if data.startswith('addch:') and user_id in self.pending:
             chat_id = int(data.split(':')[1])
+
             if 'selected' in self.pending[user_id]:
                 s = self.pending[user_id]['selected']
                 if chat_id in s:
@@ -596,12 +631,14 @@ class Bot:
                     'text': f'{self.format_user(uid, uname)} approved',
                     'parse_mode': 'Markdown'
                 })
+
                 await self.api_request('sendMessage', {'chat_id': uid, 'text': 'You are approved'})
             else:
                 await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
         elif data.startswith('reject:') and self.is_superadmin(user_id):
             uid = int(data.split(':')[1])
             if self.reject_user(uid):
+
                 cur = self.db.execute('SELECT username FROM rejected_users WHERE user_id=?', (uid,))
                 row = cur.fetchone()
                 uname = row['username'] if row else None
@@ -621,29 +658,35 @@ class Bot:
             sid = int(data.split(':')[1])
             self.pending[user_id] = {'reschedule_id': sid, 'await_time': True}
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'Enter new time'})
+
         await self.api_request('answerCallbackQuery', {'callback_query_id': query['id']})
 
 
     async def process_due(self):
         """Publish due scheduled messages."""
+
         now = datetime.utcnow().isoformat()
         logging.info("Scheduler check at %s", now)
+
         cur = self.db.execute(
             'SELECT * FROM schedule WHERE sent=0 AND publish_time<=? ORDER BY publish_time',
             (now,),
         )
         rows = cur.fetchall()
+
         logging.info("Due ids: %s", [r['id'] for r in rows])
         for row in rows:
             try:
                 resp = await self.api_request(
                     'forwardMessage',
+
                     {
                         'chat_id': row['target_chat_id'],
                         'from_chat_id': row['from_chat_id'],
                         'message_id': row['message_id'],
                     },
                 )
+
                 ok = resp.get('ok', False)
                 if not ok and resp.get('error_code') == 400 and 'not' in resp.get('description', '').lower():
                     resp = await self.api_request(
@@ -659,6 +702,7 @@ class Bot:
                     self.db.execute(
                         'UPDATE schedule SET sent=1, sent_at=? WHERE id=?',
                         (datetime.utcnow().isoformat(), row['id']),
+
                     )
                     self.db.commit()
                     logging.info('Published schedule %s', row['id'])
@@ -670,11 +714,14 @@ class Bot:
     async def schedule_loop(self):
         """Background scheduler running at configurable intervals."""
 
+
         try:
             logging.info("Scheduler loop started")
             while self.running:
                 await self.process_due()
+
                 await asyncio.sleep(SCHED_INTERVAL_SEC)
+
         except asyncio.CancelledError:
             pass
 
