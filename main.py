@@ -360,6 +360,7 @@ class Bot:
                     await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
             return
 
+
         if text.startswith('/reject') and self.is_superadmin(user_id):
             parts = text.split()
             if len(parts) == 2:
@@ -580,7 +581,9 @@ class Bot:
 
     async def process_due(self):
         """Publish due scheduled messages."""
-        now = datetime.utcnow().isoformat()
+
+        now = datetime.now().isoformat()
+
         cur = self.db.execute(
             'SELECT * FROM schedule WHERE sent=0 AND publish_time<=? ORDER BY publish_time',
             (now,),
@@ -599,7 +602,9 @@ class Bot:
                 if resp.get('ok'):
                     self.db.execute(
                         'UPDATE schedule SET sent=1, sent_at=? WHERE id=?',
-                        (datetime.utcnow().isoformat(), row['id']),
+
+                        (datetime.now().isoformat(), row['id']),
+
                     )
                     self.db.commit()
                     logging.info('Published schedule %s', row['id'])

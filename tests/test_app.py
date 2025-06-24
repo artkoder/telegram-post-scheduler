@@ -220,7 +220,9 @@ async def test_schedule_flow(tmp_path):
     await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "addch:-101", "id": "q"}})
     await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "chdone", "id": "q"}})
 
-    time_str = (datetime.utcnow() + timedelta(minutes=5)).strftime("%H:%M")
+
+    time_str = (datetime.now() + timedelta(minutes=5)).strftime("%H:%M")
+
     await bot.handle_update({"message": {"text": time_str, "from": {"id": 1}}})
 
     cur = bot.db.execute("SELECT target_chat_id FROM schedule ORDER BY target_chat_id")
@@ -264,7 +266,9 @@ async def test_scheduler_process_due(tmp_path):
     # register superadmin
     await bot.handle_update({"message": {"text": "/start", "from": {"id": 1}}})
 
-    due_time = (datetime.utcnow() - timedelta(seconds=1)).isoformat()
+
+    due_time = (datetime.now() - timedelta(seconds=1)).isoformat()
+
     bot.add_schedule(500, 5, {-100}, due_time)
 
     await bot.process_due()
@@ -275,4 +279,3 @@ async def test_scheduler_process_due(tmp_path):
     assert calls[-1][0] == "copyMessage"
 
     await bot.close()
-
