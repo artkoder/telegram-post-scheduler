@@ -5,7 +5,7 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 ## Features
 - User authorization with superadmin.
 - Channel tracking where bot is admin.
-- Schedule message forwarding to channels.
+- Schedule message forwarding to one or more channels with inline interface.
 - View posting history.
 
 ## User Stories
@@ -16,12 +16,12 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 - **US-3**: Superadmin manages pending and approved users. Rejected users cannot
   register again and pending users are shown with inline approval buttons.
 - **US-4**: Channel listener events and `/channels` command.
+- **US-5**: Post scheduling interface with channel selection, cancellation and rescheduling.
 
 ### In Progress
-- **US-5**: Post scheduling interface.
+- **US-6**: Background scheduler to publish messages.
 
 ### Planned
-
 - **US-6**: Background scheduler to publish messages.
 - **US-7**: Logging of all operations.
 

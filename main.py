@@ -112,6 +112,31 @@ class Bot:
         self.db.execute('DELETE FROM pending_users WHERE user_id=?', (uid,))
         self.db.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (uid,))
 
+    def list_scheduled(self):
+        cur = self.db.execute(
+            'SELECT id, target_chat_id, publish_time FROM schedule WHERE sent=0 ORDER BY publish_time'
+        )
+        return cur.fetchall()
+
+    def add_schedule(self, from_chat: int, msg_id: int, targets: set[int], pub_time: str):
+        for chat_id in targets:
+            self.db.execute(
+                'INSERT INTO schedule (from_chat_id, message_id, target_chat_id, publish_time) VALUES (?, ?, ?, ?)',
+                (from_chat, msg_id, chat_id, pub_time),
+            )
+        self.db.commit()
+        logging.info('Scheduled %s -> %s at %s', msg_id, list(targets), pub_time)
+
+    def remove_schedule(self, sid: int):
+        self.db.execute('DELETE FROM schedule WHERE id=?', (sid,))
+        self.db.commit()
+        logging.info('Cancelled schedule %s', sid)
+
+    def update_schedule_time(self, sid: int, pub_time: str):
+        self.db.execute('UPDATE schedule SET publish_time=? WHERE id=?', (pub_time, sid))
+        self.db.commit()
+        logging.info('Rescheduled %s to %s', sid, pub_time)
+
         self.db.execute('DELETE FROM rejected_users WHERE user_id=?', (uid,))
 
         self.db.commit()
@@ -267,26 +292,68 @@ class Bot:
                 uid = int(parts[1])
                 if self.approve_user(uid):
                     await self.api_request('sendMessage', {'chat_id': user_id, 'text': f'User {uid} approved'})
-                    await self.api_request('sendMessage', {'chat_id': uid, 'text': 'You are approved'})
-
-                else:
-                    await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
+        if text.startswith('/scheduled') and self.is_authorized(user_id):
+            rows = self.list_scheduled()
+            if not rows:
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'No scheduled posts'})
+                return
+            msg = '\n'.join(f"{r['id']}: {r['target_chat_id']} at {r['publish_time']}" for r in rows)
+            keyboard = {
+                'inline_keyboard': [
+                    [
+                        {'text': 'Cancel', 'callback_data': f'cancel:{r["id"]}'},
+                        {'text': 'Reschedule', 'callback_data': f'resch:{r["id"]}'}
+                    ]
+                    for r in rows
+                ]
+            }
+            await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg, 'reply_markup': keyboard})
             return
 
-        if text.startswith('/reject') and self.is_superadmin(user_id):
-            parts = text.split()
-            if len(parts) == 2:
-                uid = int(parts[1])
-                if self.reject_user(uid):
-                    await self.api_request('sendMessage', {'chat_id': user_id, 'text': f'User {uid} rejected'})
+            if 'reschedule_id' in data:
+                self.update_schedule_time(data['reschedule_id'], pub_time.isoformat())
+                await self.api_request('sendMessage', {
+                    'chat_id': user_id,
+                    'text': f'Rescheduled for {pub_time}'
+                })
+            else:
+                self.add_schedule(data['from_chat_id'], data['message_id'], data['selected'], pub_time.isoformat())
+                await self.api_request('sendMessage', {
+                    'chat_id': user_id,
+                    'text': f"Scheduled to {len(data['selected'])} channels for {pub_time}"
+                })
+                'inline_keyboard': [
+                    [{'text': r['title'], 'callback_data': f'addch:{r["chat_id"]}'}] for r in rows
+                ] + [[{'text': 'Done', 'callback_data': 'chdone'}]]
+                'message_id': msg_id,
+                'selected': set()
+                'text': 'Select channels',
 
-                    await self.api_request('sendMessage', {'chat_id': uid, 'text': 'Your registration was rejected'})
-
+        if data.startswith('addch:') and user_id in self.pending:
+            if 'selected' in self.pending[user_id]:
+                s = self.pending[user_id]['selected']
+                if chat_id in s:
+                    s.remove(chat_id)
                 else:
-                    await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
-            return
-
-        if text.startswith('/channels') and self.is_superadmin(user_id):
+                    s.add(chat_id)
+        elif data == 'chdone' and user_id in self.pending:
+            info = self.pending[user_id]
+            if not info.get('selected'):
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'Select at least one channel'})
+            else:
+                self.pending[user_id]['await_time'] = True
+                await self.api_request('sendMessage', {
+                    'chat_id': user_id,
+                    'text': 'Enter time (HH:MM or DD.MM.YYYY HH:MM)'
+                })
+        elif data.startswith('cancel:') and self.is_authorized(user_id):
+            sid = int(data.split(':')[1])
+            self.remove_schedule(sid)
+            await self.api_request('sendMessage', {'chat_id': user_id, 'text': f'Schedule {sid} cancelled'})
+        elif data.startswith('resch:') and self.is_authorized(user_id):
+            sid = int(data.split(':')[1])
+            self.pending[user_id] = {'reschedule_id': sid, 'await_time': True}
+            await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'Enter new time'})
 
             cur = self.db.execute('SELECT chat_id, title FROM channels')
             rows = cur.fetchall()

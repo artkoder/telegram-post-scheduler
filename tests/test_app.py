@@ -2,6 +2,7 @@ import os
 import sys
 import pytest
 from aiohttp import web
+from datetime import datetime, timedelta
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from main import create_app, Bot
@@ -109,6 +110,72 @@ async def test_channel_tracking(tmp_path):
         return {"ok": True}
 
     bot.api_request = dummy  # type: ignore
+
+
+@pytest.mark.asyncio
+async def test_schedule_flow(tmp_path):
+    bot = Bot("dummy", str(tmp_path / "db.sqlite"))
+
+    calls = []
+
+    async def dummy(method, data=None):
+        calls.append((method, data))
+        return {"ok": True}
+
+    bot.api_request = dummy  # type: ignore
+    await bot.start()
+
+    # register superadmin
+    await bot.handle_update({"message": {"text": "/start", "from": {"id": 1}}})
+
+    # bot added to two channels
+    await bot.handle_update({
+        "my_chat_member": {
+            "chat": {"id": -100, "title": "Chan1"},
+            "new_chat_member": {"status": "administrator"}
+        }
+    })
+    await bot.handle_update({
+        "my_chat_member": {
+            "chat": {"id": -101, "title": "Chan2"},
+            "new_chat_member": {"status": "administrator"}
+        }
+    })
+
+    # forward a message to schedule
+    await bot.handle_update({
+        "message": {
+            "forward_from_chat": {"id": 500},
+            "forward_from_message_id": 7,
+            "from": {"id": 1}
+        }
+    })
+    assert calls[-1][1]["reply_markup"]["inline_keyboard"][-1][0]["callback_data"] == "chdone"
+
+    # select channels and finish
+    await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "addch:-100", "id": "q"}})
+    await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "addch:-101", "id": "q"}})
+    await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "chdone", "id": "q"}})
+
+    time_str = (datetime.utcnow() + timedelta(minutes=5)).strftime("%H:%M")
+    await bot.handle_update({"message": {"text": time_str, "from": {"id": 1}}})
+
+    cur = bot.db.execute("SELECT target_chat_id FROM schedule ORDER BY target_chat_id")
+    rows = [r["target_chat_id"] for r in cur.fetchall()]
+    assert rows == [-101, -100] or rows == [-100, -101]
+
+    # list schedules
+    await bot.handle_update({"message": {"text": "/scheduled", "from": {"id": 1}}})
+    assert "cancel" in calls[-1][1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
+
+    # cancel first schedule
+    cur = bot.db.execute("SELECT id FROM schedule ORDER BY id")
+    sid = cur.fetchone()["id"]
+    await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": f"cancel:{sid}", "id": "c"}})
+    cur = bot.db.execute("SELECT * FROM schedule WHERE id=?", (sid,))
+    assert cur.fetchone() is None
+
+    await bot.close()
     await bot.start()
 
     # register superadmin
