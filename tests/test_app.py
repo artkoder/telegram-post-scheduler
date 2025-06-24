@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import pytest
 from aiohttp import web
@@ -228,7 +229,13 @@ async def test_schedule_flow(tmp_path):
 
     # list schedules
     await bot.handle_update({"message": {"text": "/scheduled", "from": {"id": 1}}})
-    assert "cancel" in calls[-1][1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
+
+    copy_calls = [c for c in calls if c[0] == "copyMessage"]
+    assert copy_calls
+    last_msg = [c for c in calls if c[0] == "sendMessage" and c[1].get("reply_markup")][-1]
+    assert "cancel" in last_msg[1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
+    assert re.search(r"\d{2}:\d{2} \d{2}\.\d{2}\.\d{4}", last_msg[1]["text"])
+
 
     # cancel first schedule
     cur = bot.db.execute("SELECT id FROM schedule ORDER BY id")

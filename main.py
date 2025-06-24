@@ -164,7 +164,10 @@ class Bot:
 
     def list_scheduled(self):
         cur = self.db.execute(
-            'SELECT id, target_chat_id, publish_time FROM schedule WHERE sent=0 ORDER BY publish_time'
+
+            'SELECT id, target_chat_id, publish_time, from_chat_id, message_id '
+            'FROM schedule WHERE sent=0 ORDER BY publish_time'
+
         )
         return cur.fetchall()
 
@@ -191,6 +194,12 @@ class Bot:
     def format_user(user_id: int, username: str | None) -> str:
         label = f"@{username}" if username else str(user_id)
         return f"[{label}](tg://user?id={user_id})"
+
+
+    @staticmethod
+    def format_time(ts: str) -> str:
+        dt = datetime.fromisoformat(ts)
+        return dt.strftime('%H:%M %d.%m.%Y')
 
 
     def is_authorized(self, user_id):
@@ -330,6 +339,7 @@ class Bot:
                 'parse_mode': 'Markdown',
                 'reply_markup': keyboard
             })
+
             return
 
         if text.startswith('/approve') and self.is_superadmin(user_id):
@@ -368,7 +378,6 @@ class Bot:
                     await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
             return
 
-
         if text.startswith('/channels') and self.is_superadmin(user_id):
 
             cur = self.db.execute('SELECT chat_id, title FROM channels')
@@ -382,7 +391,10 @@ class Bot:
                 'SELECT target_chat_id, sent_at FROM schedule WHERE sent=1 ORDER BY sent_at DESC LIMIT 10'
             )
             rows = cur.fetchall()
-            msg = '\n'.join(f"{r['target_chat_id']} at {r['sent_at']}" for r in rows)
+            msg = '\n'.join(
+                f"{r['target_chat_id']} at {self.format_time(r['sent_at'])}"
+                for r in rows
+            )
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No history'})
             return
 
@@ -391,17 +403,39 @@ class Bot:
             if not rows:
                 await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'No scheduled posts'})
                 return
-            msg = '\n'.join(f"{r['id']}: {r['target_chat_id']} at {r['publish_time']}" for r in rows)
-            keyboard = {
-                'inline_keyboard': [
-                    [
+
+            for r in rows:
+                ok = False
+                try:
+                    resp = await self.api_request('copyMessage', {
+                        'chat_id': user_id,
+                        'from_chat_id': r['from_chat_id'],
+                        'message_id': r['message_id']
+                    })
+                    ok = resp.get('ok', False)
+                except Exception:
+                    logging.exception('Failed to copy message %s', r['id'])
+                if not ok:
+                    link = None
+                    if str(r['from_chat_id']).startswith('-100'):
+                        cid = str(r['from_chat_id'])[4:]
+                        link = f'https://t.me/c/{cid}/{r["message_id"]}'
+                    await self.api_request('sendMessage', {
+                        'chat_id': user_id,
+                        'text': link or f'Message {r["message_id"]} from {r["from_chat_id"]}'
+                    })
+                keyboard = {
+                    'inline_keyboard': [[
                         {'text': 'Cancel', 'callback_data': f'cancel:{r["id"]}'},
                         {'text': 'Reschedule', 'callback_data': f'resch:{r["id"]}'}
-                    ]
-                    for r in rows
-                ]
-            }
-            await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg, 'reply_markup': keyboard})
+                    ]]
+                }
+                await self.api_request('sendMessage', {
+                    'chat_id': user_id,
+                    'text': f"{r['id']}: {r['target_chat_id']} at {self.format_time(r['publish_time'])}",
+                    'reply_markup': keyboard
+                })
+
             return
 
         # handle time input for scheduling
@@ -431,13 +465,17 @@ class Bot:
                 self.update_schedule_time(data['reschedule_id'], pub_time.isoformat())
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
-                    'text': f'Rescheduled for {pub_time}'
+
+                    'text': f'Rescheduled for {self.format_time(pub_time.isoformat())}'
+
                 })
             else:
                 self.add_schedule(data['from_chat_id'], data['message_id'], data['selected'], pub_time.isoformat())
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
-                    'text': f"Scheduled to {len(data['selected'])} channels for {pub_time}"
+
+                    'text': f"Scheduled to {len(data['selected'])} channels for {self.format_time(pub_time.isoformat())}"
+
                 })
             return
 

@@ -9,6 +9,19 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 - View posting history.
 - User lists show clickable usernames for easy profile access.
 
+
+## Commands
+- /start - register or access bot
+- /pending - list pending users (admin)
+- /approve <id> - approve user
+- /reject <id> - reject user
+- /list_users - list approved users
+- /remove_user <id> - remove user
+- /channels - list channels (admin)
+- /scheduled - show scheduled posts
+- /history - recent posts
+
+
 ## User Stories
 
 ### Done
@@ -18,7 +31,8 @@ This bot allows authorized users to schedule posts to their Telegram channels.
   register again. Pending and approved lists display clickable usernames with
   inline approval buttons.
 - **US-4**: Channel listener events and `/channels` command.
-- **US-5**: Post scheduling interface with channel selection, cancellation and rescheduling.
+- **US-5**: Post scheduling interface with channel selection, cancellation and rescheduling. Scheduled list shows the post preview or link with time in HH:MM DD.MM.YYYY format.
+
 
 ### In Progress
 - **US-6**: Background scheduler to publish messages.
@@ -26,22 +40,6 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 ### Planned
 - **US-7**: Logging of all operations.
 
-## User Stories
-
-### Done
-- **US-1**: Registration of the first superadmin.
-- **US-2**: User registration queue with limits and admin approval flow.
-- **US-3**: Superadmin manages pending and approved users. Rejected users cannot
-  register again and pending users are shown with inline approval buttons.
-- **US-4**: Channel listener events and `/channels` command.
-
-### In Progress
-- **US-5**: Post scheduling interface.
-
-### Planned
-
-- **US-6**: Background scheduler to publish messages.
-- **US-7**: Logging of all operations.
 
 ## Deployment
 The bot is designed for Fly.io using a webhook on `/webhook` and listens on port `8080`.
