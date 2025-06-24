@@ -21,6 +21,7 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 - /scheduled - show scheduled posts
 - /history - recent posts
 
+
 ## User Stories
 
 ### Done
@@ -38,6 +39,7 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 
 ### Planned
 - none
+
 
 ## Deployment
 The bot is designed for Fly.io using a webhook on `/webhook` and listens on port `8080`.
