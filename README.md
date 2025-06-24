@@ -26,6 +26,23 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 ### Planned
 - **US-7**: Logging of all operations.
 
+## User Stories
+
+### Done
+- **US-1**: Registration of the first superadmin.
+- **US-2**: User registration queue with limits and admin approval flow.
+- **US-3**: Superadmin manages pending and approved users. Rejected users cannot
+  register again and pending users are shown with inline approval buttons.
+- **US-4**: Channel listener events and `/channels` command.
+
+### In Progress
+- **US-5**: Post scheduling interface.
+
+### Planned
+
+- **US-6**: Background scheduler to publish messages.
+- **US-7**: Logging of all operations.
+
 ## Deployment
 The bot is designed for Fly.io using a webhook on `/webhook` and listens on port `8080`.
 For Telegram to reach the webhook over HTTPS, the Fly.io service must expose port `443` with TLS termination enabled. This is configured in `fly.toml`.

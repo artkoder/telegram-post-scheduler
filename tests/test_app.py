@@ -26,6 +26,7 @@ async def test_startup_cleanup():
 async def test_registration_queue(tmp_path):
     bot = Bot("dummy", str(tmp_path / "db.sqlite"))
 
+
     calls = []
 
     async def dummy(method, data=None):
@@ -42,6 +43,7 @@ async def test_registration_queue(tmp_path):
     await bot.handle_update({"message": {"text": "/start", "from": {"id": 2}}})
     assert bot.is_pending(2)
 
+
     # reject user 2 and ensure they cannot re-register
     bot.reject_user(2)
     await bot.handle_update({"message": {"text": "/start", "from": {"id": 2}}})
@@ -50,6 +52,7 @@ async def test_registration_queue(tmp_path):
     assert calls[-1][0] == 'sendMessage'
     assert calls[-1][1]['text'] == 'Access denied by administrator'
 
+
     await bot.close()
 
 
@@ -57,10 +60,12 @@ async def test_registration_queue(tmp_path):
 async def test_superadmin_user_management(tmp_path):
     bot = Bot("dummy", str(tmp_path / "db.sqlite"))
 
+
     calls = []
 
     async def dummy(method, data=None):
         calls.append((method, data))
+
         return {"ok": True}
 
     bot.api_request = dummy  # type: ignore
@@ -70,11 +75,13 @@ async def test_superadmin_user_management(tmp_path):
     await bot.handle_update({"message": {"text": "/start", "from": {"id": 2}}})
     await bot.handle_update({"message": {"text": "/pending", "from": {"id": 1}}})
     assert bot.is_pending(2)
+
     pending_msg = calls[-1]
     assert pending_msg[0] == 'sendMessage'
     assert pending_msg[1]['reply_markup']['inline_keyboard'][0][0]['callback_data'] == 'approve:2'
     assert 'tg://user?id=2' in pending_msg[1]['text']
     assert pending_msg[1]['parse_mode'] == 'Markdown'
+
 
     await bot.handle_update({"message": {"text": "/approve 2", "from": {"id": 1}}})
     assert bot.get_user(2)
@@ -89,6 +96,7 @@ async def test_superadmin_user_management(tmp_path):
     assert not bot.get_user(2)
 
     await bot.close()
+
 
 
 @pytest.mark.asyncio
@@ -115,6 +123,7 @@ async def test_list_users_links(tmp_path):
     assert 'tg://user?id=2' in msg['text']
 
     await bot.close()
+
 
 
 @pytest.mark.asyncio
@@ -229,3 +238,4 @@ async def test_schedule_flow(tmp_path):
     assert cur.fetchone() is None
 
     await bot.close()
+

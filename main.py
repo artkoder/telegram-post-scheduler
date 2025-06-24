@@ -21,12 +21,16 @@ CREATE_TABLES = [
         )""",
     """CREATE TABLE IF NOT EXISTS pending_users (
             user_id INTEGER PRIMARY KEY,
+
             username TEXT,
+
             requested_at TEXT
         )""",
     """CREATE TABLE IF NOT EXISTS rejected_users (
             user_id INTEGER PRIMARY KEY,
+
             username TEXT,
+
             rejected_at TEXT
         )""",
     """CREATE TABLE IF NOT EXISTS channels (
@@ -123,6 +127,7 @@ class Bot:
     def approve_user(self, uid: int) -> bool:
         if not self.is_pending(uid):
             return False
+
         cur = self.db.execute('SELECT username FROM pending_users WHERE user_id=?', (uid,))
         row = cur.fetchone()
         username = row['username'] if row else None
@@ -131,6 +136,7 @@ class Bot:
         if username:
             self.db.execute('UPDATE users SET username=? WHERE user_id=?', (username, uid))
         self.db.execute('DELETE FROM rejected_users WHERE user_id=?', (uid,))
+
         self.db.commit()
         logging.info('Approved user %s', uid)
         return True
@@ -138,6 +144,7 @@ class Bot:
     def reject_user(self, uid: int) -> bool:
         if not self.is_pending(uid):
             return False
+
         cur = self.db.execute('SELECT username FROM pending_users WHERE user_id=?', (uid,))
         row = cur.fetchone()
         username = row['username'] if row else None
@@ -145,6 +152,7 @@ class Bot:
         self.db.execute(
             'INSERT OR REPLACE INTO rejected_users (user_id, username, rejected_at) VALUES (?, ?, ?)',
             (uid, username, datetime.utcnow().isoformat()),
+
         )
         self.db.commit()
         logging.info('Rejected user %s', uid)
@@ -184,6 +192,7 @@ class Bot:
         label = f"@{username}" if username else str(user_id)
         return f"[{label}](tg://user?id={user_id})"
 
+
     def is_authorized(self, user_id):
         return self.get_user(user_id) is not None
 
@@ -212,6 +221,7 @@ class Bot:
                 })
                 return
 
+
             if self.is_pending(user_id):
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
@@ -222,7 +232,9 @@ class Bot:
             cur = self.db.execute('SELECT COUNT(*) FROM users')
             user_count = cur.fetchone()[0]
             if user_count == 0:
+
                 self.db.execute('INSERT INTO users (user_id, username, is_superadmin) VALUES (?, ?, 1)', (user_id, username))
+
                 self.db.commit()
                 logging.info('Registered %s as superadmin', user_id)
                 await self.api_request('sendMessage', {
@@ -240,8 +252,10 @@ class Bot:
                 return
 
             self.db.execute(
+
                 'INSERT OR IGNORE INTO pending_users (user_id, username, requested_at) VALUES (?, ?, ?)',
                 (user_id, username, datetime.utcnow().isoformat())
+
             )
             self.db.commit()
             logging.info('User %s added to pending queue', user_id)
@@ -354,7 +368,9 @@ class Bot:
                     await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
             return
 
+
         if text.startswith('/channels') and self.is_superadmin(user_id):
+
             cur = self.db.execute('SELECT chat_id, title FROM channels')
             rows = cur.fetchall()
             msg = '\n'.join(f"{r['title']} ({r['chat_id']})" for r in rows)
@@ -465,6 +481,7 @@ class Bot:
         data = query['data']
         if data.startswith('addch:') and user_id in self.pending:
             chat_id = int(data.split(':')[1])
+
             if 'selected' in self.pending[user_id]:
                 s = self.pending[user_id]['selected']
                 if chat_id in s:
@@ -492,12 +509,14 @@ class Bot:
                     'text': f'{self.format_user(uid, uname)} approved',
                     'parse_mode': 'Markdown'
                 })
+
                 await self.api_request('sendMessage', {'chat_id': uid, 'text': 'You are approved'})
             else:
                 await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
         elif data.startswith('reject:') and self.is_superadmin(user_id):
             uid = int(data.split(':')[1])
             if self.reject_user(uid):
+
                 cur = self.db.execute('SELECT username FROM rejected_users WHERE user_id=?', (uid,))
                 row = cur.fetchone()
                 uname = row['username'] if row else None
@@ -517,6 +536,7 @@ class Bot:
             sid = int(data.split(':')[1])
             self.pending[user_id] = {'reschedule_id': sid, 'await_time': True}
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'Enter new time'})
+
         await self.api_request('answerCallbackQuery', {'callback_query_id': query['id']})
 
 
