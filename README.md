@@ -5,15 +5,12 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 ## Features
 - User authorization with superadmin.
 - Channel tracking where bot is admin.
-
 - Schedule message forwarding to one or more channels with inline interface. The bot forwards the original post so views and custom emoji are preserved. It must be a member of the source channel.
 - If forwarding fails (e.g., bot not in source), the message is copied instead.
 - View posting history.
 - User lists show clickable usernames for easy profile access.
-
 - Local timezone support for scheduling.
 - Configurable scheduler interval.
-
 
 
 ## Commands
@@ -24,11 +21,9 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 - /list_users - list approved users
 - /remove_user <id> - remove user
 - /channels - list channels (admin)
-- /scheduled - show scheduled posts
+- /scheduled - show scheduled posts with target channel names
 - /history - recent posts
-
 - /tz <offset> - set timezone offset (e.g., +02:00)
-
 
 ## User Stories
 
@@ -39,17 +34,14 @@ This bot allows authorized users to schedule posts to their Telegram channels.
   register again. Pending and approved lists display clickable usernames with
   inline approval buttons.
 - **US-4**: Channel listener events and `/channels` command.
-- **US-5**: Post scheduling interface with channel selection, cancellation and rescheduling. Scheduled list shows the post preview or link with time in HH:MM DD.MM.YYYY format.
-
+- **US-5**: Post scheduling interface with channel selection, cancellation and rescheduling. Scheduled list shows the post preview or link along with the target channel name and time in HH:MM DD.MM.YYYY format.
  - **US-6**: Scheduler forwards queued posts at the correct local time. If forwarding fails because the bot is not a member, it falls back to copying. Interval is configurable and all actions are logged.
-
 
 ### In Progress
 - **US-7**: Logging of all operations.
 
 ### Planned
 - none
-
 
 ## Deployment
 The bot is designed for Fly.io using a webhook on `/webhook` and listens on port `8080`.
