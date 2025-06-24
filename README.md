@@ -5,7 +5,9 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 ## Features
 - User authorization with superadmin.
 - Channel tracking where bot is admin.
-- Schedule message forwarding to one or more channels with inline interface.
+
+- Schedule message forwarding to one or more channels with inline interface. The bot forwards the original post so views and custom emoji are preserved. It must be a member of the source channel.
+- If forwarding fails (e.g., bot not in source), the message is copied instead.
 - View posting history.
 - User lists show clickable usernames for easy profile access.
 
@@ -38,7 +40,8 @@ This bot allows authorized users to schedule posts to their Telegram channels.
   inline approval buttons.
 - **US-4**: Channel listener events and `/channels` command.
 - **US-5**: Post scheduling interface with channel selection, cancellation and rescheduling. Scheduled list shows the post preview or link with time in HH:MM DD.MM.YYYY format.
- - **US-6**: Scheduler publishes due posts at the correct local time with configurable interval and detailed logging.
+
+ - **US-6**: Scheduler forwards queued posts at the correct local time. If forwarding fails because the bot is not a member, it falls back to copying. Interval is configurable and all actions are logged.
 
 
 ### In Progress

@@ -34,20 +34,6 @@ CREATE_TABLES = [
             rejected_at TEXT
 
         )""",
-    """CREATE TABLE IF NOT EXISTS pending_users (
-            user_id INTEGER PRIMARY KEY,
-
-            username TEXT,
-
-            requested_at TEXT
-        )""",
-    """CREATE TABLE IF NOT EXISTS rejected_users (
-            user_id INTEGER PRIMARY KEY,
-
-            username TEXT,
-
-            rejected_at TEXT
-        )""",
     """CREATE TABLE IF NOT EXISTS channels (
             chat_id INTEGER PRIMARY KEY,
             title TEXT
@@ -373,6 +359,7 @@ class Bot:
                 'text': msg or 'No users',
                 'parse_mode': 'Markdown'
             })
+
             return
 
         if text.startswith('/pending') and self.is_superadmin(user_id):
@@ -420,6 +407,7 @@ class Bot:
                 else:
                     await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
             return
+
 
         if text.startswith('/reject') and self.is_superadmin(user_id):
             parts = text.split()
@@ -469,18 +457,27 @@ class Bot:
                 return
 
             offset = self.get_tz_offset(user_id)
-
             for r in rows:
                 ok = False
                 try:
-                    resp = await self.api_request('copyMessage', {
+                    resp = await self.api_request('forwardMessage', {
+
                         'chat_id': user_id,
                         'from_chat_id': r['from_chat_id'],
                         'message_id': r['message_id']
                     })
                     ok = resp.get('ok', False)
+
+                    if not ok and resp.get('error_code') == 400 and 'not' in resp.get('description', '').lower():
+                        resp = await self.api_request('copyMessage', {
+                            'chat_id': user_id,
+                            'from_chat_id': r['from_chat_id'],
+                            'message_id': r['message_id']
+                        })
+                        ok = resp.get('ok', False)
                 except Exception:
-                    logging.exception('Failed to copy message %s', r['id'])
+                    logging.exception('Failed to forward message %s', r['id'])
+
                 if not ok:
                     link = None
                     if str(r['from_chat_id']).startswith('-100'):
@@ -537,6 +534,22 @@ class Bot:
                     'text': f'Rescheduled for {self.format_time(pub_time_utc.isoformat(), offset)}'
                 })
             else:
+
+                test = await self.api_request(
+                    'forwardMessage',
+                    {
+                        'chat_id': user_id,
+                        'from_chat_id': data['from_chat_id'],
+                        'message_id': data['message_id']
+                    }
+                )
+                if not test.get('ok'):
+                    await self.api_request('sendMessage', {
+                        'chat_id': user_id,
+                        'text': f"Add the bot to channel {data['from_chat_id']} (reader role) first"
+                    })
+                    return
+
                 self.add_schedule(data['from_chat_id'], data['message_id'], data['selected'], pub_time_utc.isoformat())
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
@@ -578,6 +591,11 @@ class Bot:
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
                     'text': 'Not authorized'
+                })
+            else:
+                await self.api_request('sendMessage', {
+                    'chat_id': user_id,
+                    'text': 'Please forward a post from a channel'
                 })
 
     async def handle_callback(self, query):
@@ -657,21 +675,32 @@ class Bot:
         rows = cur.fetchall()
 
         logging.info("Due ids: %s", [r['id'] for r in rows])
-
         for row in rows:
             try:
                 resp = await self.api_request(
-                    'copyMessage',
+                    'forwardMessage',
+
                     {
                         'chat_id': row['target_chat_id'],
                         'from_chat_id': row['from_chat_id'],
                         'message_id': row['message_id'],
                     },
                 )
-                if resp.get('ok'):
+
+                ok = resp.get('ok', False)
+                if not ok and resp.get('error_code') == 400 and 'not' in resp.get('description', '').lower():
+                    resp = await self.api_request(
+                        'copyMessage',
+                        {
+                            'chat_id': row['target_chat_id'],
+                            'from_chat_id': row['from_chat_id'],
+                            'message_id': row['message_id'],
+                        },
+                    )
+                    ok = resp.get('ok', False)
+                if ok:
                     self.db.execute(
                         'UPDATE schedule SET sent=1, sent_at=? WHERE id=?',
-
                         (datetime.utcnow().isoformat(), row['id']),
 
                     )

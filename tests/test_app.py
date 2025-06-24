@@ -246,8 +246,9 @@ async def test_schedule_flow(tmp_path):
 
 
     time_str = (datetime.now() + timedelta(minutes=5)).strftime("%H:%M")
-
     await bot.handle_update({"message": {"text": time_str, "from": {"id": 1}}})
+    assert any(c[0] == "forwardMessage" for c in calls)
+
 
     cur = bot.db.execute("SELECT target_chat_id FROM schedule ORDER BY target_chat_id")
     rows = [r["target_chat_id"] for r in cur.fetchall()]
@@ -256,8 +257,9 @@ async def test_schedule_flow(tmp_path):
     # list schedules
     await bot.handle_update({"message": {"text": "/scheduled", "from": {"id": 1}}})
 
-    copy_calls = [c for c in calls if c[0] == "copyMessage"]
-    assert copy_calls
+    forward_calls = [c for c in calls if c[0] == "forwardMessage"]
+    assert forward_calls
+
     last_msg = [c for c in calls if c[0] == "sendMessage" and c[1].get("reply_markup")][-1]
     assert "cancel" in last_msg[1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
     assert re.search(r"\d{2}:\d{2} \d{2}\.\d{2}\.\d{4}", last_msg[1]["text"])
@@ -300,6 +302,8 @@ async def test_scheduler_process_due(tmp_path):
     cur = bot.db.execute("SELECT sent FROM schedule")
     row = cur.fetchone()
     assert row["sent"] == 1
-    assert calls[-1][0] == "copyMessage"
+
+    assert calls[-1][0] == "forwardMessage"
+
 
     await bot.close()
