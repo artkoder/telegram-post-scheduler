@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import sqlite3
-from datetime import datetime, date
+from datetime import datetime, date, timedelta, timezone
 import contextlib
 
 from aiohttp import web, ClientSession
@@ -12,12 +12,27 @@ logging.basicConfig(level=logging.INFO)
 
 DB_PATH = os.getenv("DB_PATH", "bot.db")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://telegram-post-scheduler.fly.dev")
+TZ_OFFSET = os.getenv("TZ_OFFSET", "+00:00")
+SCHED_INTERVAL_SEC = int(os.getenv("SCHED_INTERVAL_SEC", "30"))
 
 CREATE_TABLES = [
     """CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             username TEXT,
-            is_superadmin INTEGER DEFAULT 0
+
+            is_superadmin INTEGER DEFAULT 0,
+            tz_offset TEXT
+        )""",
+    """CREATE TABLE IF NOT EXISTS pending_users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            requested_at TEXT
+        )""",
+    """CREATE TABLE IF NOT EXISTS rejected_users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            rejected_at TEXT
+
         )""",
     """CREATE TABLE IF NOT EXISTS pending_users (
             user_id INTEGER PRIMARY KEY,
@@ -60,6 +75,9 @@ class Bot:
         # ensure new columns exist when upgrading
         for table, column in (
             ("users", "username"),
+
+            ("users", "tz_offset"),
+
             ("pending_users", "username"),
             ("rejected_users", "username"),
         ):
@@ -85,9 +103,19 @@ class Bot:
 
     async def api_request(self, method: str, data: dict = None):
         async with self.session.post(f"{self.api_url}/{method}", json=data) as resp:
+            text = await resp.text()
             if resp.status != 200:
-                logging.error("API error: %s", await resp.text())
-            return await resp.json()
+                logging.error("API HTTP %s for %s: %s", resp.status, method, text)
+            try:
+                result = json.loads(text)
+            except Exception:
+                logging.exception("Invalid response for %s: %s", method, text)
+                return {}
+            if not result.get("ok"):
+                logging.error("API call %s failed: %s", method, result)
+            else:
+                logging.info("API call %s succeeded", method)
+            return result
 
     async def handle_update(self, update):
         if 'message' in update:
@@ -132,7 +160,11 @@ class Bot:
         row = cur.fetchone()
         username = row['username'] if row else None
         self.db.execute('DELETE FROM pending_users WHERE user_id=?', (uid,))
-        self.db.execute('INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)', (uid, username))
+
+        self.db.execute(
+            'INSERT OR IGNORE INTO users (user_id, username, tz_offset) VALUES (?, ?, ?)',
+            (uid, username, TZ_OFFSET)
+        )
         if username:
             self.db.execute('UPDATE users SET username=? WHERE user_id=?', (username, uid))
         self.db.execute('DELETE FROM rejected_users WHERE user_id=?', (uid,))
@@ -197,9 +229,20 @@ class Bot:
 
 
     @staticmethod
-    def format_time(ts: str) -> str:
+    def parse_offset(offset: str) -> timedelta:
+        sign = -1 if offset.startswith('-') else 1
+        h, m = offset.lstrip('+-').split(':')
+        return timedelta(minutes=sign * (int(h) * 60 + int(m)))
+
+    def format_time(self, ts: str, offset: str) -> str:
         dt = datetime.fromisoformat(ts)
+        dt += self.parse_offset(offset)
         return dt.strftime('%H:%M %d.%m.%Y')
+
+    def get_tz_offset(self, user_id: int) -> str:
+        cur = self.db.execute('SELECT tz_offset FROM users WHERE user_id=?', (user_id,))
+        row = cur.fetchone()
+        return row['tz_offset'] if row and row['tz_offset'] else TZ_OFFSET
 
 
     def is_authorized(self, user_id):
@@ -242,7 +285,7 @@ class Bot:
             user_count = cur.fetchone()[0]
             if user_count == 0:
 
-                self.db.execute('INSERT INTO users (user_id, username, is_superadmin) VALUES (?, ?, 1)', (user_id, username))
+                self.db.execute('INSERT INTO users (user_id, username, is_superadmin, tz_offset) VALUES (?, ?, 1, ?)', (user_id, username, TZ_OFFSET))
 
                 self.db.commit()
                 logging.info('Registered %s as superadmin', user_id)
@@ -299,8 +342,27 @@ class Bot:
                 })
             return
 
+        if text.startswith('/tz'):
+            parts = text.split()
+            if not self.is_authorized(user_id):
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'Not authorized'})
+                return
+            if len(parts) != 2:
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'Usage: /tz +02:00'})
+                return
+            try:
+                self.parse_offset(parts[1])
+            except Exception:
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'Invalid offset'})
+                return
+            self.db.execute('UPDATE users SET tz_offset=? WHERE user_id=?', (parts[1], user_id))
+            self.db.commit()
+            await self.api_request('sendMessage', {'chat_id': user_id, 'text': f'Timezone set to {parts[1]}'})
+            return
+
         if text.startswith('/list_users') and self.is_superadmin(user_id):
             cur = self.db.execute('SELECT user_id, username, is_superadmin FROM users')
+
             rows = cur.fetchall()
             msg = '\n'.join(
                 f"{self.format_user(r['user_id'], r['username'])} {'(admin)' if r['is_superadmin'] else ''}"
@@ -339,7 +401,6 @@ class Bot:
                 'parse_mode': 'Markdown',
                 'reply_markup': keyboard
             })
-
             return
 
         if text.startswith('/approve') and self.is_superadmin(user_id):
@@ -359,7 +420,6 @@ class Bot:
                 else:
                     await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'User not in pending list'})
             return
-
 
         if text.startswith('/reject') and self.is_superadmin(user_id):
             parts = text.split()
@@ -392,8 +452,11 @@ class Bot:
                 'SELECT target_chat_id, sent_at FROM schedule WHERE sent=1 ORDER BY sent_at DESC LIMIT 10'
             )
             rows = cur.fetchall()
+
+            offset = self.get_tz_offset(user_id)
             msg = '\n'.join(
-                f"{r['target_chat_id']} at {self.format_time(r['sent_at'])}"
+                f"{r['target_chat_id']} at {self.format_time(r['sent_at'], offset)}"
+
                 for r in rows
             )
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No history'})
@@ -404,6 +467,8 @@ class Bot:
             if not rows:
                 await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'No scheduled posts'})
                 return
+
+            offset = self.get_tz_offset(user_id)
 
             for r in rows:
                 ok = False
@@ -433,7 +498,8 @@ class Bot:
                 }
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
-                    'text': f"{r['id']}: {r['target_chat_id']} at {self.format_time(r['publish_time'])}",
+
+                    'text': f"{r['id']}: {r['target_chat_id']} at {self.format_time(r['publish_time'], offset)}",
                     'reply_markup': keyboard
                 })
 
@@ -444,7 +510,6 @@ class Bot:
             time_str = text.strip()
             try:
                 if len(time_str.split()) == 1:
-                    # HH:MM today
                     dt = datetime.strptime(time_str, '%H:%M')
                     pub_time = datetime.combine(date.today(), dt.time())
                 else:
@@ -455,7 +520,9 @@ class Bot:
                     'text': 'Invalid time format'
                 })
                 return
-            if pub_time <= datetime.now():
+            offset = self.get_tz_offset(user_id)
+            pub_time_utc = pub_time - self.parse_offset(offset)
+            if pub_time_utc <= datetime.utcnow():
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
                     'text': 'Time must be in future'
@@ -463,19 +530,17 @@ class Bot:
                 return
             data = self.pending.pop(user_id)
             if 'reschedule_id' in data:
-                self.update_schedule_time(data['reschedule_id'], pub_time.isoformat())
+
+                self.update_schedule_time(data['reschedule_id'], pub_time_utc.isoformat())
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
-
-                    'text': f'Rescheduled for {self.format_time(pub_time.isoformat())}'
-
+                    'text': f'Rescheduled for {self.format_time(pub_time_utc.isoformat(), offset)}'
                 })
             else:
-                self.add_schedule(data['from_chat_id'], data['message_id'], data['selected'], pub_time.isoformat())
+                self.add_schedule(data['from_chat_id'], data['message_id'], data['selected'], pub_time_utc.isoformat())
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
-
-                    'text': f"Scheduled to {len(data['selected'])} channels for {self.format_time(pub_time.isoformat())}"
+                    'text': f"Scheduled to {len(data['selected'])} channels for {self.format_time(pub_time_utc.isoformat(), offset)}"
 
                 })
             return
@@ -582,13 +647,17 @@ class Bot:
     async def process_due(self):
         """Publish due scheduled messages."""
 
-        now = datetime.now().isoformat()
+        now = datetime.utcnow().isoformat()
+        logging.info("Scheduler check at %s", now)
 
         cur = self.db.execute(
             'SELECT * FROM schedule WHERE sent=0 AND publish_time<=? ORDER BY publish_time',
             (now,),
         )
         rows = cur.fetchall()
+
+        logging.info("Due ids: %s", [r['id'] for r in rows])
+
         for row in rows:
             try:
                 resp = await self.api_request(
@@ -603,7 +672,7 @@ class Bot:
                     self.db.execute(
                         'UPDATE schedule SET sent=1, sent_at=? WHERE id=?',
 
-                        (datetime.now().isoformat(), row['id']),
+                        (datetime.utcnow().isoformat(), row['id']),
 
                     )
                     self.db.commit()
@@ -614,13 +683,16 @@ class Bot:
                 logging.exception('Error publishing schedule %s', row['id'])
 
     async def schedule_loop(self):
-        """Background scheduler running every minute."""
+        """Background scheduler running at configurable intervals."""
+
 
         try:
             logging.info("Scheduler loop started")
             while self.running:
                 await self.process_due()
-                await asyncio.sleep(60)
+
+                await asyncio.sleep(SCHED_INTERVAL_SEC)
+
         except asyncio.CancelledError:
             pass
 

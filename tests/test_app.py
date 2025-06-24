@@ -128,6 +128,30 @@ async def test_list_users_links(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_set_timezone(tmp_path):
+    bot = Bot("dummy", str(tmp_path / "db.sqlite"))
+
+    calls = []
+
+    async def dummy(method, data=None):
+        calls.append((method, data))
+        return {"ok": True}
+
+    bot.api_request = dummy  # type: ignore
+    await bot.start()
+
+    await bot.handle_update({"message": {"text": "/start", "from": {"id": 1}}})
+    await bot.handle_update({"message": {"text": "/tz +03:00", "from": {"id": 1}}})
+
+    cur = bot.db.execute("SELECT tz_offset FROM users WHERE user_id=1")
+    row = cur.fetchone()
+    assert row["tz_offset"] == "+03:00"
+
+    await bot.close()
+
+
+
+@pytest.mark.asyncio
 async def test_channel_tracking(tmp_path):
     bot = Bot("dummy", str(tmp_path / "db.sqlite"))
 
@@ -267,7 +291,7 @@ async def test_scheduler_process_due(tmp_path):
     await bot.handle_update({"message": {"text": "/start", "from": {"id": 1}}})
 
 
-    due_time = (datetime.now() - timedelta(seconds=1)).isoformat()
+    due_time = (datetime.utcnow() - timedelta(seconds=1)).isoformat()
 
     bot.add_schedule(500, 5, {-100}, due_time)
 

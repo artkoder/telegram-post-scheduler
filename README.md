@@ -9,6 +9,10 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 - View posting history.
 - User lists show clickable usernames for easy profile access.
 
+- Local timezone support for scheduling.
+- Configurable scheduler interval.
+
+
 
 ## Commands
 - /start - register or access bot
@@ -21,6 +25,8 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 - /scheduled - show scheduled posts
 - /history - recent posts
 
+- /tz <offset> - set timezone offset (e.g., +02:00)
+
 
 ## User Stories
 
@@ -32,7 +38,8 @@ This bot allows authorized users to schedule posts to their Telegram channels.
   inline approval buttons.
 - **US-4**: Channel listener events and `/channels` command.
 - **US-5**: Post scheduling interface with channel selection, cancellation and rescheduling. Scheduled list shows the post preview or link with time in HH:MM DD.MM.YYYY format.
-- **US-6**: Background scheduler publishes due messages every minute.
+ - **US-6**: Scheduler publishes due posts at the correct local time with configurable interval and detailed logging.
+
 
 ### In Progress
 - **US-7**: Logging of all operations.
@@ -52,6 +59,8 @@ For Telegram to reach the webhook over HTTPS, the Fly.io service must expose por
 
 - `DB_PATH` – path to the SQLite database (default `bot.db`).
 - `FLY_API_TOKEN` – token for automated Fly deployments.
+- `TZ_OFFSET` – default timezone offset like `+02:00`.
+- `SCHED_INTERVAL_SEC` – scheduler check interval in seconds (default `30`).
 
 ### Запуск локально
 1. Install dependencies:
