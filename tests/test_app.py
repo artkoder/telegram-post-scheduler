@@ -27,6 +27,7 @@ async def test_startup_cleanup():
 async def test_registration_queue(tmp_path):
     bot = Bot("dummy", str(tmp_path / "db.sqlite"))
 
+
     calls = []
 
     async def dummy(method, data=None):
@@ -43,6 +44,7 @@ async def test_registration_queue(tmp_path):
     await bot.handle_update({"message": {"text": "/start", "from": {"id": 2}}})
     assert bot.is_pending(2)
 
+
     # reject user 2 and ensure they cannot re-register
     bot.reject_user(2)
     await bot.handle_update({"message": {"text": "/start", "from": {"id": 2}}})
@@ -51,6 +53,7 @@ async def test_registration_queue(tmp_path):
     assert calls[-1][0] == 'sendMessage'
     assert calls[-1][1]['text'] == 'Access denied by administrator'
 
+
     await bot.close()
 
 
@@ -58,10 +61,12 @@ async def test_registration_queue(tmp_path):
 async def test_superadmin_user_management(tmp_path):
     bot = Bot("dummy", str(tmp_path / "db.sqlite"))
 
+
     calls = []
 
     async def dummy(method, data=None):
         calls.append((method, data))
+
         return {"ok": True}
 
     bot.api_request = dummy  # type: ignore
@@ -71,11 +76,13 @@ async def test_superadmin_user_management(tmp_path):
     await bot.handle_update({"message": {"text": "/start", "from": {"id": 2}}})
     await bot.handle_update({"message": {"text": "/pending", "from": {"id": 1}}})
     assert bot.is_pending(2)
+
     pending_msg = calls[-1]
     assert pending_msg[0] == 'sendMessage'
     assert pending_msg[1]['reply_markup']['inline_keyboard'][0][0]['callback_data'] == 'approve:2'
     assert 'tg://user?id=2' in pending_msg[1]['text']
     assert pending_msg[1]['parse_mode'] == 'Markdown'
+
 
     await bot.handle_update({"message": {"text": "/approve 2", "from": {"id": 1}}})
     assert bot.get_user(2)
@@ -90,6 +97,7 @@ async def test_superadmin_user_management(tmp_path):
     assert not bot.get_user(2)
 
     await bot.close()
+
 
 
 @pytest.mark.asyncio
@@ -116,6 +124,7 @@ async def test_list_users_links(tmp_path):
     assert 'tg://user?id=2' in msg['text']
 
     await bot.close()
+
 
 
 @pytest.mark.asyncio
@@ -211,7 +220,9 @@ async def test_schedule_flow(tmp_path):
     await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "addch:-101", "id": "q"}})
     await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "chdone", "id": "q"}})
 
+
     time_str = (datetime.now() + timedelta(minutes=5)).strftime("%H:%M")
+
     await bot.handle_update({"message": {"text": time_str, "from": {"id": 1}}})
 
     cur = bot.db.execute("SELECT target_chat_id FROM schedule ORDER BY target_chat_id")
@@ -220,11 +231,13 @@ async def test_schedule_flow(tmp_path):
 
     # list schedules
     await bot.handle_update({"message": {"text": "/scheduled", "from": {"id": 1}}})
+
     copy_calls = [c for c in calls if c[0] == "copyMessage"]
     assert copy_calls
     last_msg = [c for c in calls if c[0] == "sendMessage" and c[1].get("reply_markup")][-1]
     assert "cancel" in last_msg[1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
     assert re.search(r"\d{2}:\d{2} \d{2}\.\d{2}\.\d{4}", last_msg[1]["text"])
+
 
     # cancel first schedule
     cur = bot.db.execute("SELECT id FROM schedule ORDER BY id")
@@ -234,6 +247,7 @@ async def test_schedule_flow(tmp_path):
     assert cur.fetchone() is None
 
     await bot.close()
+
 
 
 @pytest.mark.asyncio
@@ -252,7 +266,9 @@ async def test_scheduler_process_due(tmp_path):
     # register superadmin
     await bot.handle_update({"message": {"text": "/start", "from": {"id": 1}}})
 
+
     due_time = (datetime.now() - timedelta(seconds=1)).isoformat()
+
     bot.add_schedule(500, 5, {-100}, due_time)
 
     await bot.process_due()
