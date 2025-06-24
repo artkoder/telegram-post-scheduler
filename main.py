@@ -578,13 +578,43 @@ class Bot:
         await self.api_request('answerCallbackQuery', {'callback_query_id': query['id']})
 
 
+    async def process_due(self):
+        """Publish due scheduled messages."""
+        now = datetime.utcnow().isoformat()
+        cur = self.db.execute(
+            'SELECT * FROM schedule WHERE sent=0 AND publish_time<=? ORDER BY publish_time',
+            (now,),
+        )
+        rows = cur.fetchall()
+        for row in rows:
+            try:
+                resp = await self.api_request(
+                    'copyMessage',
+                    {
+                        'chat_id': row['target_chat_id'],
+                        'from_chat_id': row['from_chat_id'],
+                        'message_id': row['message_id'],
+                    },
+                )
+                if resp.get('ok'):
+                    self.db.execute(
+                        'UPDATE schedule SET sent=1, sent_at=? WHERE id=?',
+                        (datetime.utcnow().isoformat(), row['id']),
+                    )
+                    self.db.commit()
+                    logging.info('Published schedule %s', row['id'])
+                else:
+                    logging.error('Failed to publish %s: %s', row['id'], resp)
+            except Exception:
+                logging.exception('Error publishing schedule %s', row['id'])
+
     async def schedule_loop(self):
-        """Background scheduler placeholder."""
-        # TODO: implement scheduler
+        """Background scheduler running every minute."""
 
         try:
             logging.info("Scheduler loop started")
             while self.running:
+                await self.process_due()
                 await asyncio.sleep(60)
         except asyncio.CancelledError:
             pass

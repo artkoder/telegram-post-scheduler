@@ -246,3 +246,33 @@ async def test_schedule_flow(tmp_path):
 
     await bot.close()
 
+
+
+@pytest.mark.asyncio
+async def test_scheduler_process_due(tmp_path):
+    bot = Bot("dummy", str(tmp_path / "db.sqlite"))
+
+    calls = []
+
+    async def dummy(method, data=None):
+        calls.append((method, data))
+        return {"ok": True}
+
+    bot.api_request = dummy  # type: ignore
+    await bot.start()
+
+    # register superadmin
+    await bot.handle_update({"message": {"text": "/start", "from": {"id": 1}}})
+
+    due_time = (datetime.utcnow() - timedelta(seconds=1)).isoformat()
+    bot.add_schedule(500, 5, {-100}, due_time)
+
+    await bot.process_due()
+
+    cur = bot.db.execute("SELECT sent FROM schedule")
+    row = cur.fetchone()
+    assert row["sent"] == 1
+    assert calls[-1][0] == "copyMessage"
+
+    await bot.close()
+
