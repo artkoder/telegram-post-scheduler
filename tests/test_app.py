@@ -291,3 +291,33 @@ async def test_scheduler_process_due(tmp_path):
     assert calls[-1][0] == "forwardMessage"
 
     await bot.close()
+
+
+@pytest.mark.asyncio
+async def test_refresh_vk_groups(tmp_path):
+    os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
+    os.environ["VK_TOKEN"] = "token"
+    bot = Bot("dummy", os.environ["DB_PATH"])
+
+    async def dummy_api(method, data=None):
+        return {"ok": True}
+
+    async def dummy_vk(method, params=None):
+        return {"response": {"items": [{"id": 123, "name": "Test Group"}]}}
+
+    bot.api_request = dummy_api  # type: ignore
+    bot.vk_request = dummy_vk  # type: ignore
+    bot.vk_token = "token"
+    await bot.start()
+
+    await bot.handle_update({"message": {"text": "/start", "from": {"id": 1}}})
+
+    bot.db.execute("DELETE FROM vk_groups")
+    bot.db.commit()
+
+    await bot.handle_update({"message": {"text": "/refresh_vkgroups", "from": {"id": 1}}})
+    cur = bot.db.execute("SELECT name FROM vk_groups WHERE group_id=123")
+    row = cur.fetchone()
+    assert row and row["name"] == "Test Group"
+
+    await bot.close()
