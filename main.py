@@ -63,6 +63,9 @@ class Bot:
             self.db.execute(stmt)
         self.db.commit()
         self.vk_token = os.getenv("VK_TOKEN")
+
+        self.vk_group_id = os.getenv("VK_GROUP_ID")
+
         # ensure new columns exist when upgrading
         for table, column in (
             ("users", "username"),
@@ -176,12 +179,29 @@ class Bot:
     async def load_vk_groups(self):
         if not self.vk_token:
             return
+
+
+        groups: list[dict] = []
         resp = await self.vk_request("groups.get", {"extended": 1, "filter": "admin"})
-        items = resp.get("response", {}).get("items", [])
-        for g in items:
+        if "response" in resp:
+            groups = resp["response"].get("items", [])
+        elif self.vk_group_id:
+            # group tokens cannot call groups.get; try groups.getById
+            resp = await self.vk_request("groups.getById", {"group_id": self.vk_group_id})
+            g = None
+            if isinstance(resp.get("response"), list):
+                if resp["response"]:
+                    g = resp["response"][0]
+            elif isinstance(resp.get("response"), dict):
+                g = resp["response"]
+            if g:
+                groups = [g]
+
+        for g in groups:
             self.db.execute(
                 "INSERT OR REPLACE INTO vk_groups (group_id, name) VALUES (?, ?)",
-                (g["id"], g.get("name", "")),
+                (g.get("id") or g.get("group_id"), g.get("name", "")),
+
             )
         self.db.commit()
 

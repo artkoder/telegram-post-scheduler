@@ -321,3 +321,39 @@ async def test_refresh_vk_groups(tmp_path):
     assert row and row["name"] == "Test Group"
 
     await bot.close()
+
+
+
+@pytest.mark.asyncio
+async def test_vk_group_token(tmp_path):
+    os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
+    os.environ["VK_TOKEN"] = "token"
+    os.environ["VK_GROUP_ID"] = "777"
+    bot = Bot("dummy", os.environ["DB_PATH"])
+
+    calls = []
+
+    async def dummy_vk(method, params=None):
+        calls.append((method, params))
+        if method == "groups.get":
+            return {"error": {"error_code": 27}}
+        if method == "groups.getById":
+            assert params.get("group_id") == "777"
+            return {"response": [{"id": 777, "name": "My Group"}]}
+        return {}
+
+    async def dummy_api(method, data=None):
+        return {"ok": True}
+
+    bot.vk_request = dummy_vk  # type: ignore
+    bot.api_request = dummy_api  # type: ignore
+    await bot.start()
+
+    await bot.handle_update({"message": {"text": "/refresh_vkgroups", "from": {"id": 1}}})
+    cur = bot.db.execute("SELECT name FROM vk_groups WHERE group_id=777")
+    row = cur.fetchone()
+    assert row and row["name"] == "My Group"
+    assert ("groups.getById", {"group_id": "777"}) in calls
+
+    await bot.close()
+
