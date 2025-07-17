@@ -143,7 +143,18 @@ class Bot:
                         ) as resp:
                             data = await resp.read()
                         # upload to VK
-                        up = await self.vk_request("photos.getWallUploadServer", {"group_id": row["target_chat_id"]})
+
+                        up = await self.vk_request(
+                            "photos.getWallUploadServer",
+                            {"group_id": row["target_chat_id"]},
+                        )
+                        if "error" in up and up["error"].get("error_code") == 27:
+                            logging.warning(
+                                "Photo uploads require a user VK token; skipping attachments"
+                            )
+                            attachments = []
+                            break
+
                         url = up.get("response", {}).get("upload_url")
                         if not url:
                             continue
