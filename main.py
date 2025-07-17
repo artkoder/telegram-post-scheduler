@@ -111,12 +111,23 @@ class Bot:
                     logging.error("Failed to publish telegram message: %s", resp)
                     return False
             else:
+
+                msg = (
+                    row.get("msg_text", "")
+                    if isinstance(row, dict)
+                    else row["msg_text"]
+                )
+                if not msg:
+                    msg = "Forwarded from Telegram"
+
                 resp = await self.vk_request(
                     "wall.post",
                     {
                         "owner_id": -int(row["target_chat_id"]),
                         "from_group": 1,
-                        "message": row.get("msg_text", ""),
+
+                        "message": msg,
+
                     },
                 )
                 if "response" not in resp:
@@ -535,7 +546,6 @@ class Bot:
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No groups'})
             return
 
-
         if text.startswith('/refresh_vkgroups') and self.is_superadmin(user_id):
             await self.load_vk_groups()
             cur = self.db.execute('SELECT group_id, name FROM vk_groups')
@@ -676,7 +686,10 @@ class Bot:
             self.pending[user_id] = {
                 'from_chat_id': from_chat,
                 'message_id': msg_id,
-                'msg_text': message.get('text', ''),
+
+                'msg_text': message.get('text')
+                or message.get('caption', ''),
+
             }
             keyboard = {
                 'inline_keyboard': [[

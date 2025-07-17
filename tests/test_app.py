@@ -357,3 +357,44 @@ async def test_vk_group_token(tmp_path):
 
     await bot.close()
 
+
+
+@pytest.mark.asyncio
+async def test_vk_post_uses_caption(tmp_path):
+    os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
+    os.environ["VK_TOKEN"] = "token"
+    bot = Bot("dummy", os.environ["DB_PATH"])
+
+    calls = []
+
+    async def dummy_vk(method, params=None):
+        calls.append((method, params))
+        return {"response": {"post_id": 1}}
+
+    async def dummy_api(method, data=None):
+        return {"ok": True}
+
+    bot.vk_request = dummy_vk  # type: ignore
+    bot.api_request = dummy_api  # type: ignore
+    bot.db.execute("INSERT INTO vk_groups (group_id, name) VALUES (111, 'G')")
+    bot.db.commit()
+    await bot.start()
+
+    await bot.handle_update({"message": {"text": "/start", "from": {"id": 1}}})
+
+    await bot.handle_update({
+        "message": {
+            "forward_from_chat": {"id": 500},
+            "forward_from_message_id": 7,
+            "caption": "hello",
+            "from": {"id": 1}
+        }
+    })
+    await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "svc:vk", "id": "q"}})
+    await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "vkgrp:111", "id": "q"}})
+    await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "sendnow", "id": "q"}})
+
+    assert any(c[0] == "wall.post" and c[1]["message"] == "hello" for c in calls)
+
+    await bot.close()
+
