@@ -1,11 +1,11 @@
 # Telegram Scheduler Bot
 
-This bot allows authorized users to schedule posts to their Telegram channels.
+This bot allows authorized users to schedule posts to their Telegram channels or VK communities.
 
 ## Features
 - User authorization with superadmin.
 - Channel tracking where bot is admin.
-- Schedule message forwarding to one or more channels with inline interface. The bot forwards the original post so views and custom emoji are preserved. It must be a member of the source channel.
+- Schedule message forwarding to Telegram channels or posting to VK groups. The bot forwards the original post so views and custom emoji are preserved in Telegram.
 - If forwarding fails (e.g., bot not in source), the message is copied instead.
 - View posting history.
 - User lists show clickable usernames for easy profile access.
@@ -20,10 +20,12 @@ This bot allows authorized users to schedule posts to their Telegram channels.
 - /reject <id> - reject user
 - /list_users - list approved users
 - /remove_user <id> - remove user
-- /channels - list channels (admin)
+- /channels - list Telegram channels (admin)
+- /vkgroups - list connected VK groups (admin)
 - /scheduled - show scheduled posts with target channel names
 - /history - recent posts
 - /tz <offset> - set timezone offset (e.g., +02:00)
+- Forward a post to the bot, choose Telegram or VK, then select a channel/group and time or "Now" to publish.
 
 ## User Stories
 
@@ -52,7 +54,8 @@ For Telegram to reach the webhook over HTTPS, the Fly.io service must expose por
 
 - `WEBHOOK_URL` – external HTTPS URL of the deployed application. Used to register the Telegram webhook.
 
-- `DB_PATH` – path to the SQLite database (default `bot.db`).
+- `DB_PATH` – path to the SQLite database (default `/data/bot.db`).
+- `VK_TOKEN` – API token for posting to VK.
 - `FLY_API_TOKEN` – token for automated Fly deployments.
 - `TZ_OFFSET` – default timezone offset like `+02:00`.
 - `SCHED_INTERVAL_SEC` – scheduler check interval in seconds (default `30`).
@@ -77,6 +80,8 @@ For Telegram to reach the webhook over HTTPS, the Fly.io service must expose por
 ```bash
 fly launch
 fly volumes create sched_db --size 1
+
+The volume is mounted to `/data`, so set `DB_PATH=/data/bot.db` to keep data between deployments.
 
 
 ```
