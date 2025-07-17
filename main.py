@@ -10,7 +10,7 @@ from aiohttp import web, ClientSession
 
 logging.basicConfig(level=logging.INFO)
 
-DB_PATH = os.getenv("DB_PATH", "bot.db")
+DB_PATH = os.getenv("DB_PATH", "/data/bot.db")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://telegram-post-scheduler.fly.dev")
 TZ_OFFSET = os.getenv("TZ_OFFSET", "+00:00")
 SCHED_INTERVAL_SEC = int(os.getenv("SCHED_INTERVAL_SEC", "30"))
@@ -38,30 +38,43 @@ CREATE_TABLES = [
         )""",
     """CREATE TABLE IF NOT EXISTS schedule (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            service TEXT DEFAULT 'telegram',
             from_chat_id INTEGER,
             message_id INTEGER,
             target_chat_id INTEGER,
+            msg_text TEXT,
+            attachments TEXT,
             publish_time TEXT,
             sent INTEGER DEFAULT 0,
             sent_at TEXT
+        )""",
+    """CREATE TABLE IF NOT EXISTS vk_groups (
+            group_id INTEGER PRIMARY KEY,
+            name TEXT
         )""",
 ]
 
 
 class Bot:
     def __init__(self, token: str, db_path: str):
+        self.token = token
         self.api_url = f"https://api.telegram.org/bot{token}"
         self.db = sqlite3.connect(db_path)
         self.db.row_factory = sqlite3.Row
         for stmt in CREATE_TABLES:
             self.db.execute(stmt)
         self.db.commit()
+        self.vk_token = os.getenv("VK_TOKEN")
+        self.vk_group_id = os.getenv("VK_GROUP_ID")
         # ensure new columns exist when upgrading
         for table, column in (
             ("users", "username"),
             ("users", "tz_offset"),
             ("pending_users", "username"),
             ("rejected_users", "username"),
+            ("schedule", "service"),
+            ("schedule", "msg_text"),
+            ("schedule", "attachments"),
         ):
             cur = self.db.execute(f"PRAGMA table_info({table})")
             names = [r[1] for r in cur.fetchall()]
@@ -72,9 +85,94 @@ class Bot:
         self.session: ClientSession | None = None
         self.running = False
 
+    async def publish_row(self, row):
+        service = row["service"] if isinstance(row, dict) else row["service"]
+        try:
+            if service == "tg" or service == "telegram":
+                resp = await self.api_request(
+                    "forwardMessage",
+                    {
+                        "chat_id": row["target_chat_id"],
+                        "from_chat_id": row["from_chat_id"],
+                        "message_id": row["message_id"],
+                    },
+                )
+                ok = resp.get("ok", False)
+                if not ok and resp.get("error_code") == 400 and "not" in resp.get("description", "").lower():
+                    resp = await self.api_request(
+                        "copyMessage",
+                        {
+                            "chat_id": row["target_chat_id"],
+                            "from_chat_id": row["from_chat_id"],
+                            "message_id": row["message_id"],
+                        },
+                    )
+                    ok = resp.get("ok", False)
+                if not ok:
+                    logging.error("Failed to publish telegram message: %s", resp)
+                    return False
+            else:
+                msg = (
+                    row.get("msg_text", "")
+                    if isinstance(row, dict)
+                    else row["msg_text"]
+                )
+                if not msg:
+                    msg = "Forwarded from Telegram"
+                attachments = []
+                attach_list = row.get("attachments") if isinstance(row, dict) else row["attachments"]
+                if attach_list:
+                    if isinstance(attach_list, str):
+                        attach_list = json.loads(attach_list)
+                    for fid in attach_list:
+                        # get file path from Telegram
+                        file_info = await self.api_request("getFile", {"file_id": fid})
+                        fpath = file_info.get("result", {}).get("file_path")
+                        if not fpath:
+                            continue
+                        async with self.session.get(
+                            f"https://api.telegram.org/file/bot{self.token}/{fpath}"
+                        ) as resp:
+                            data = await resp.read()
+                        # upload to VK
+                        up = await self.vk_request("photos.getWallUploadServer", {"group_id": row["target_chat_id"]})
+                        url = up.get("response", {}).get("upload_url")
+                        if not url:
+                            continue
+                        upload = await self.vk_upload(url, data)
+                        saved = await self.vk_request(
+                            "photos.saveWallPhoto",
+                            {
+                                "group_id": row["target_chat_id"],
+                                "photo": upload.get("photo"),
+                                "server": upload.get("server"),
+                                "hash": upload.get("hash"),
+                            },
+                        )
+                        if "response" in saved and saved["response"]:
+                            item = saved["response"][0]
+                            attachments.append(f"photo{item['owner_id']}_{item['id']}")
+                params = {
+                    "owner_id": -int(row["target_chat_id"]),
+                    "from_group": 1,
+                    "message": msg,
+                }
+                if attachments:
+                    params["attachments"] = ",".join(attachments)
+                resp = await self.vk_request("wall.post", params)
+                if "response" not in resp:
+                    logging.error("Failed to publish VK message: %s", resp)
+                    return False
+            return True
+        except Exception:
+            logging.exception("Error publishing row %s", row)
+            return False
+
     async def start(self):
         self.session = ClientSession()
         self.running = True
+        if self.vk_token:
+            await self.load_vk_groups()
 
     async def close(self):
         self.running = False
@@ -98,6 +196,62 @@ class Bot:
             else:
                 logging.info("API call %s succeeded", method)
             return result
+
+    async def vk_request(self, method: str, params: dict | None = None):
+        """Call VK API if token configured."""
+        if not self.vk_token:
+            return {}
+        params = params or {}
+        params.setdefault("access_token", self.vk_token)
+        params.setdefault("v", "5.131")
+        async with self.session.post(f"https://api.vk.com/method/{method}", data=params) as resp:
+            text = await resp.text()
+            try:
+                result = json.loads(text)
+            except Exception:
+                logging.exception("Invalid VK response for %s: %s", method, text)
+                return {}
+            if "error" in result:
+                logging.error("VK call %s failed: %s", method, result)
+            else:
+                logging.info("VK call %s succeeded", method)
+            return result
+
+    async def vk_upload(self, url: str, data: bytes) -> dict:
+        async with self.session.post(url, data={"photo": data}) as resp:
+            text = await resp.text()
+            try:
+                return json.loads(text)
+            except Exception:
+                logging.exception("Invalid VK upload response: %s", text)
+                return {}
+
+    async def load_vk_groups(self):
+        if not self.vk_token:
+            return
+
+        groups: list[dict] = []
+        resp = await self.vk_request("groups.get", {"extended": 1, "filter": "admin"})
+        if "response" in resp:
+            groups = resp["response"].get("items", [])
+        elif self.vk_group_id:
+            # group tokens cannot call groups.get; try groups.getById
+            resp = await self.vk_request("groups.getById", {"group_id": self.vk_group_id})
+            g = None
+            if isinstance(resp.get("response"), list):
+                if resp["response"]:
+                    g = resp["response"][0]
+            elif isinstance(resp.get("response"), dict):
+                g = resp["response"]
+            if g:
+                groups = [g]
+
+        for g in groups:
+            self.db.execute(
+                "INSERT OR REPLACE INTO vk_groups (group_id, name) VALUES (?, ?)",
+                (g.get("id") or g.get("group_id"), g.get("name", "")),
+            )
+        self.db.commit()
 
     async def handle_update(self, update):
         if 'message' in update:
@@ -180,14 +334,22 @@ class Bot:
         )
         return cur.fetchall()
 
-    def add_schedule(self, from_chat: int, msg_id: int, targets: set[int], pub_time: str):
-        for chat_id in targets:
-            self.db.execute(
-                'INSERT INTO schedule (from_chat_id, message_id, target_chat_id, publish_time) VALUES (?, ?, ?, ?)',
-                (from_chat, msg_id, chat_id, pub_time),
-            )
+    def add_schedule(
+        self,
+        service: str,
+        from_chat: int | None,
+        msg_id: int | None,
+        target: int,
+        pub_time: str,
+        text: str | None = None,
+        attachments: list[str] | None = None,
+    ):
+        self.db.execute(
+            'INSERT INTO schedule (service, from_chat_id, message_id, target_chat_id, msg_text, attachments, publish_time) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (service, from_chat, msg_id, target, text, json.dumps(attachments or []), pub_time),
+        )
         self.db.commit()
-        logging.info('Scheduled %s -> %s at %s', msg_id, list(targets), pub_time)
+        logging.info('Scheduled %s to %s at %s', service, target, pub_time)
 
     def remove_schedule(self, sid: int):
         self.db.execute('DELETE FROM schedule WHERE id=?', (sid,))
@@ -415,6 +577,21 @@ class Bot:
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No channels'})
             return
 
+        if text.startswith('/vkgroups') and self.is_superadmin(user_id):
+            cur = self.db.execute('SELECT group_id, name FROM vk_groups')
+            rows = cur.fetchall()
+            msg = '\n'.join(f"{r['name']} ({r['group_id']})" for r in rows)
+            await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No groups'})
+            return
+
+        if text.startswith('/refresh_vkgroups') and self.is_superadmin(user_id):
+            await self.load_vk_groups()
+            cur = self.db.execute('SELECT group_id, name FROM vk_groups')
+            rows = cur.fetchall()
+            msg = '\n'.join(f"{r['name']} ({r['group_id']})" for r in rows)
+            await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No groups'})
+            return
+
         if text.startswith('/history'):
             cur = self.db.execute(
                 'SELECT target_chat_id, sent_at FROM schedule WHERE sent=1 ORDER BY sent_at DESC LIMIT 10'
@@ -509,24 +686,34 @@ class Bot:
                     'text': f'Rescheduled for {self.format_time(pub_time_utc.isoformat(), offset)}'
                 })
             else:
-                test = await self.api_request(
-                    'forwardMessage',
-                    {
-                        'chat_id': user_id,
-                        'from_chat_id': data['from_chat_id'],
-                        'message_id': data['message_id']
-                    }
+                service = data.get('service', 'tg')
+                if service == 'tg':
+                    test = await self.api_request(
+                        'forwardMessage',
+                        {
+                            'chat_id': user_id,
+                            'from_chat_id': data['from_chat_id'],
+                            'message_id': data['message_id']
+                        }
+                    )
+                    if not test.get('ok'):
+                        await self.api_request('sendMessage', {
+                            'chat_id': user_id,
+                            'text': f"Add the bot to channel {data['from_chat_id']} (reader role) first"
+                        })
+                        return
+                self.add_schedule(
+                    service,
+                    data.get('from_chat_id'),
+                    data.get('message_id'),
+                    data.get('target'),
+                    pub_time_utc.isoformat(),
+                    data.get('msg_text'),
+                    data.get('attachments'),
                 )
-                if not test.get('ok'):
-                    await self.api_request('sendMessage', {
-                        'chat_id': user_id,
-                        'text': f"Add the bot to channel {data['from_chat_id']} (reader role) first"
-                    })
-                    return
-                self.add_schedule(data['from_chat_id'], data['message_id'], data['selected'], pub_time_utc.isoformat())
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
-                    'text': f"Scheduled to {len(data['selected'])} channels for {self.format_time(pub_time_utc.isoformat(), offset)}"
+                    'text': f"Scheduled for {self.format_time(pub_time_utc.isoformat(), offset)}"
                 })
             return
 
@@ -534,27 +721,25 @@ class Bot:
         if 'forward_from_chat' in message and self.is_authorized(user_id):
             from_chat = message['forward_from_chat']['id']
             msg_id = message['forward_from_message_id']
-            cur = self.db.execute('SELECT chat_id, title FROM channels')
-            rows = cur.fetchall()
-            if not rows:
-                await self.api_request('sendMessage', {
-                    'chat_id': user_id,
-                    'text': 'No channels available'
-                })
-                return
-            keyboard = {
-                'inline_keyboard': [
-                    [{'text': r['title'], 'callback_data': f'addch:{r["chat_id"]}'}] for r in rows
-                ] + [[{'text': 'Done', 'callback_data': 'chdone'}]]
-            }
+            attachments = []
+            if 'photo' in message:
+                attachments = [p['file_id'] for p in message['photo']]
             self.pending[user_id] = {
                 'from_chat_id': from_chat,
                 'message_id': msg_id,
-                'selected': set()
+                'msg_text': message.get('text')
+                or message.get('caption', ''),
+                'attachments': attachments,
+            }
+            keyboard = {
+                'inline_keyboard': [[
+                    {'text': 'Telegram', 'callback_data': 'svc:tg'},
+                    {'text': 'VK', 'callback_data': 'svc:vk'}
+                ]]
             }
             await self.api_request('sendMessage', {
                 'chat_id': user_id,
-                'text': 'Select channels',
+                'text': 'Select service',
                 'reply_markup': keyboard
             })
             return
@@ -573,24 +758,53 @@ class Bot:
     async def handle_callback(self, query):
         user_id = query['from']['id']
         data = query['data']
-        if data.startswith('addch:') and user_id in self.pending:
-            chat_id = int(data.split(':')[1])
-            if 'selected' in self.pending[user_id]:
-                s = self.pending[user_id]['selected']
-                if chat_id in s:
-                    s.remove(chat_id)
-                else:
-                    s.add(chat_id)
-        elif data == 'chdone' and user_id in self.pending:
-            info = self.pending[user_id]
-            if not info.get('selected'):
-                await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'Select at least one channel'})
+        if data.startswith('svc:') and user_id in self.pending:
+            svc = data.split(':')[1]
+            self.pending[user_id]['service'] = svc
+            if svc == 'tg':
+                cur = self.db.execute('SELECT chat_id, title FROM channels')
+                rows = cur.fetchall()
+                if not rows:
+                    await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'No channels available'})
+                    self.pending.pop(user_id, None)
+                    return
+                keyboard = {
+                    'inline_keyboard': [[{'text': r['title'], 'callback_data': f'tgch:{r["chat_id"]}'}] for r in rows]
+                }
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'Select channel', 'reply_markup': keyboard})
             else:
-                self.pending[user_id]['await_time'] = True
-                await self.api_request('sendMessage', {
-                    'chat_id': user_id,
-                    'text': 'Enter time (HH:MM or DD.MM.YYYY HH:MM)'
-                })
+                cur = self.db.execute('SELECT group_id, name FROM vk_groups')
+                rows = cur.fetchall()
+                if not rows:
+                    await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'No groups available'})
+                    self.pending.pop(user_id, None)
+                    return
+                keyboard = {
+                    'inline_keyboard': [[{'text': r['name'], 'callback_data': f'vkgrp:{r["group_id"]}'}] for r in rows]
+                }
+                await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'Select VK group', 'reply_markup': keyboard})
+        elif data.startswith('tgch:') and user_id in self.pending:
+            self.pending[user_id]['target'] = int(data.split(':')[1])
+            self.pending[user_id]['await_time'] = True
+            keyboard = {'inline_keyboard': [[{'text': 'Now', 'callback_data': 'sendnow'}]]}
+            await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'Enter time (HH:MM or DD.MM.YYYY HH:MM) or choose Now', 'reply_markup': keyboard})
+        elif data.startswith('vkgrp:') and user_id in self.pending:
+            self.pending[user_id]['target'] = int(data.split(':')[1])
+            self.pending[user_id]['await_time'] = True
+            keyboard = {'inline_keyboard': [[{'text': 'Now', 'callback_data': 'sendnow'}]]}
+            await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'Enter time (HH:MM or DD.MM.YYYY HH:MM) or choose Now', 'reply_markup': keyboard})
+        elif data == 'sendnow' and user_id in self.pending:
+            info = self.pending.pop(user_id)
+            await self.publish_row({
+                'service': info.get('service', 'tg'),
+                'from_chat_id': info.get('from_chat_id'),
+                'message_id': info.get('message_id'),
+                'target_chat_id': info.get('target'),
+                'msg_text': info.get('msg_text'),
+                'attachments': info.get('attachments'),
+                'id': None,
+            })
+            await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'Sent'})
         elif data.startswith('approve:') and self.is_superadmin(user_id):
             uid = int(data.split(':')[1])
             if self.approve_user(uid):
@@ -642,25 +856,7 @@ class Bot:
         logging.info("Due ids: %s", [r['id'] for r in rows])
         for row in rows:
             try:
-                resp = await self.api_request(
-                    'forwardMessage',
-                    {
-                        'chat_id': row['target_chat_id'],
-                        'from_chat_id': row['from_chat_id'],
-                        'message_id': row['message_id'],
-                    },
-                )
-                ok = resp.get('ok', False)
-                if not ok and resp.get('error_code') == 400 and 'not' in resp.get('description', '').lower():
-                    resp = await self.api_request(
-                        'copyMessage',
-                        {
-                            'chat_id': row['target_chat_id'],
-                            'from_chat_id': row['from_chat_id'],
-                            'message_id': row['message_id'],
-                        },
-                    )
-                    ok = resp.get('ok', False)
+                ok = await self.publish_row(row)
                 if ok:
                     self.db.execute(
                         'UPDATE schedule SET sent=1, sent_at=? WHERE id=?',
@@ -668,8 +864,6 @@ class Bot:
                     )
                     self.db.commit()
                     logging.info('Published schedule %s', row['id'])
-                else:
-                    logging.error('Failed to publish %s: %s', row['id'], resp)
             except Exception:
                 logging.exception('Error publishing schedule %s', row['id'])
 
