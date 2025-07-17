@@ -11,7 +11,10 @@ from main import create_app, Bot
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "dummy")
 
 @pytest.mark.asyncio
-async def test_startup_cleanup():
+async def test_startup_cleanup(tmp_path):
+    os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
+    import main
+    main.DB_PATH = os.environ["DB_PATH"]
     app = create_app()
 
     async def dummy(method, data=None):
@@ -227,20 +230,20 @@ async def test_schedule_flow(tmp_path):
             "from": {"id": 1}
         }
     })
-    assert calls[-1][1]["reply_markup"]["inline_keyboard"][-1][0]["callback_data"] == "chdone"
+    keyboard = calls[-1][1]["reply_markup"]["inline_keyboard"]
+    assert any(btn["callback_data"] == "svc:tg" for btn in keyboard[0])
 
-    # select channels and finish
-    await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "addch:-100", "id": "q"}})
-    await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "addch:-101", "id": "q"}})
-    await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "chdone", "id": "q"}})
+    # select service and channel
+    await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "svc:tg", "id": "q"}})
+    await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "tgch:-100", "id": "q"}})
 
     time_str = (datetime.now() + timedelta(minutes=5)).strftime("%H:%M")
     await bot.handle_update({"message": {"text": time_str, "from": {"id": 1}}})
     assert any(c[0] == "forwardMessage" for c in calls)
 
-    cur = bot.db.execute("SELECT target_chat_id FROM schedule ORDER BY target_chat_id")
+    cur = bot.db.execute("SELECT target_chat_id FROM schedule")
     rows = [r["target_chat_id"] for r in cur.fetchall()]
-    assert rows == [-101, -100] or rows == [-100, -101]
+    assert rows == [-100]
 
     # list schedules
     await bot.handle_update({"message": {"text": "/scheduled", "from": {"id": 1}}})
@@ -278,7 +281,7 @@ async def test_scheduler_process_due(tmp_path):
     await bot.handle_update({"message": {"text": "/start", "from": {"id": 1}}})
 
     due_time = (datetime.utcnow() - timedelta(seconds=1)).isoformat()
-    bot.add_schedule(500, 5, {-100}, due_time)
+    bot.add_schedule('tg', 500, 5, -100, due_time)
 
     await bot.process_due()
 
@@ -286,5 +289,69 @@ async def test_scheduler_process_due(tmp_path):
     row = cur.fetchone()
     assert row["sent"] == 1
     assert calls[-1][0] == "forwardMessage"
+
+    await bot.close()
+
+
+@pytest.mark.asyncio
+async def test_refresh_vk_groups(tmp_path):
+    os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
+    os.environ["VK_TOKEN"] = "token"
+    bot = Bot("dummy", os.environ["DB_PATH"])
+
+    async def dummy_api(method, data=None):
+        return {"ok": True}
+
+    async def dummy_vk(method, params=None):
+        return {"response": {"items": [{"id": 123, "name": "Test Group"}]}}
+
+    bot.api_request = dummy_api  # type: ignore
+    bot.vk_request = dummy_vk  # type: ignore
+    bot.vk_token = "token"
+    await bot.start()
+
+    await bot.handle_update({"message": {"text": "/start", "from": {"id": 1}}})
+
+    bot.db.execute("DELETE FROM vk_groups")
+    bot.db.commit()
+
+    await bot.handle_update({"message": {"text": "/refresh_vkgroups", "from": {"id": 1}}})
+    cur = bot.db.execute("SELECT name FROM vk_groups WHERE group_id=123")
+    row = cur.fetchone()
+    assert row and row["name"] == "Test Group"
+
+    await bot.close()
+
+
+@pytest.mark.asyncio
+async def test_vk_group_token(tmp_path):
+    os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
+    os.environ["VK_TOKEN"] = "token"
+    os.environ["VK_GROUP_ID"] = "777"
+    bot = Bot("dummy", os.environ["DB_PATH"])
+
+    calls = []
+
+    async def dummy_vk(method, params=None):
+        calls.append((method, params))
+        if method == "groups.get":
+            return {"error": {"error_code": 27}}
+        if method == "groups.getById":
+            assert params.get("group_id") == "777"
+            return {"response": [{"id": 777, "name": "My Group"}]}
+        return {}
+
+    async def dummy_api(method, data=None):
+        return {"ok": True}
+
+    bot.vk_request = dummy_vk  # type: ignore
+    bot.api_request = dummy_api  # type: ignore
+    await bot.start()
+
+    await bot.handle_update({"message": {"text": "/refresh_vkgroups", "from": {"id": 1}}})
+    cur = bot.db.execute("SELECT name FROM vk_groups WHERE group_id=777")
+    row = cur.fetchone()
+    assert row and row["name"] == "My Group"
+    assert ("groups.getById", {"group_id": "777"}) in calls
 
     await bot.close()
