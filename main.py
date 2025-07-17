@@ -63,7 +63,9 @@ class Bot:
             self.db.execute(stmt)
         self.db.commit()
         self.vk_token = os.getenv("VK_TOKEN")
+
         self.vk_group_id = os.getenv("VK_GROUP_ID")
+
         # ensure new columns exist when upgrading
         for table, column in (
             ("users", "username"),
@@ -109,6 +111,7 @@ class Bot:
                     logging.error("Failed to publish telegram message: %s", resp)
                     return False
             else:
+
                 msg = (
                     row.get("msg_text", "")
                     if isinstance(row, dict)
@@ -116,12 +119,15 @@ class Bot:
                 )
                 if not msg:
                     msg = "Forwarded from Telegram"
+
                 resp = await self.vk_request(
                     "wall.post",
                     {
                         "owner_id": -int(row["target_chat_id"]),
                         "from_group": 1,
+
                         "message": msg,
+
                     },
                 )
                 if "response" not in resp:
@@ -185,6 +191,7 @@ class Bot:
         if not self.vk_token:
             return
 
+
         groups: list[dict] = []
         resp = await self.vk_request("groups.get", {"extended": 1, "filter": "admin"})
         if "response" in resp:
@@ -205,6 +212,7 @@ class Bot:
             self.db.execute(
                 "INSERT OR REPLACE INTO vk_groups (group_id, name) VALUES (?, ?)",
                 (g.get("id") or g.get("group_id"), g.get("name", "")),
+
             )
         self.db.commit()
 
@@ -546,6 +554,7 @@ class Bot:
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No groups'})
             return
 
+
         if text.startswith('/history'):
             cur = self.db.execute(
                 'SELECT target_chat_id, sent_at FROM schedule WHERE sent=1 ORDER BY sent_at DESC LIMIT 10'
@@ -677,8 +686,10 @@ class Bot:
             self.pending[user_id] = {
                 'from_chat_id': from_chat,
                 'message_id': msg_id,
+
                 'msg_text': message.get('text')
                 or message.get('caption', ''),
+
             }
             keyboard = {
                 'inline_keyboard': [[
