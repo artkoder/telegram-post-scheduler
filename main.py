@@ -43,6 +43,9 @@ CREATE_TABLES = [
             message_id INTEGER,
             target_chat_id INTEGER,
             msg_text TEXT,
+
+            attachments TEXT,
+
             publish_time TEXT,
             sent INTEGER DEFAULT 0,
             sent_at TEXT
@@ -56,6 +59,7 @@ CREATE_TABLES = [
 
 class Bot:
     def __init__(self, token: str, db_path: str):
+        self.token = token
         self.api_url = f"https://api.telegram.org/bot{token}"
         self.db = sqlite3.connect(db_path)
         self.db.row_factory = sqlite3.Row
@@ -74,6 +78,9 @@ class Bot:
             ("rejected_users", "username"),
             ("schedule", "service"),
             ("schedule", "msg_text"),
+
+            ("schedule", "attachments"),
+
         ):
             cur = self.db.execute(f"PRAGMA table_info({table})")
             names = [r[1] for r in cur.fetchall()]
@@ -120,16 +127,48 @@ class Bot:
                 if not msg:
                     msg = "Forwarded from Telegram"
 
-                resp = await self.vk_request(
-                    "wall.post",
-                    {
-                        "owner_id": -int(row["target_chat_id"]),
-                        "from_group": 1,
+                attachments = []
+                attach_list = row.get("attachments") if isinstance(row, dict) else row["attachments"]
+                if attach_list:
+                    if isinstance(attach_list, str):
+                        attach_list = json.loads(attach_list)
+                    for fid in attach_list:
+                        # get file path from Telegram
+                        file_info = await self.api_request("getFile", {"file_id": fid})
+                        fpath = file_info.get("result", {}).get("file_path")
+                        if not fpath:
+                            continue
+                        async with self.session.get(
+                            f"https://api.telegram.org/file/bot{self.token}/{fpath}"
+                        ) as resp:
+                            data = await resp.read()
+                        # upload to VK
+                        up = await self.vk_request("photos.getWallUploadServer", {"group_id": row["target_chat_id"]})
+                        url = up.get("response", {}).get("upload_url")
+                        if not url:
+                            continue
+                        upload = await self.vk_upload(url, data)
+                        saved = await self.vk_request(
+                            "photos.saveWallPhoto",
+                            {
+                                "group_id": row["target_chat_id"],
+                                "photo": upload.get("photo"),
+                                "server": upload.get("server"),
+                                "hash": upload.get("hash"),
+                            },
+                        )
+                        if "response" in saved and saved["response"]:
+                            item = saved["response"][0]
+                            attachments.append(f"photo{item['owner_id']}_{item['id']}")
+                params = {
+                    "owner_id": -int(row["target_chat_id"]),
+                    "from_group": 1,
+                    "message": msg,
+                }
+                if attachments:
+                    params["attachments"] = ",".join(attachments)
+                resp = await self.vk_request("wall.post", params)
 
-                        "message": msg,
-
-                    },
-                )
                 if "response" not in resp:
                     logging.error("Failed to publish VK message: %s", resp)
                     return False
@@ -186,6 +225,17 @@ class Bot:
             else:
                 logging.info("VK call %s succeeded", method)
             return result
+
+
+    async def vk_upload(self, url: str, data: bytes) -> dict:
+        async with self.session.post(url, data={"photo": data}) as resp:
+            text = await resp.text()
+            try:
+                return json.loads(text)
+            except Exception:
+                logging.exception("Invalid VK upload response: %s", text)
+                return {}
+
 
     async def load_vk_groups(self):
         if not self.vk_token:
@@ -305,10 +355,13 @@ class Bot:
         target: int,
         pub_time: str,
         text: str | None = None,
+
+        attachments: list[str] | None = None,
     ):
         self.db.execute(
-            'INSERT INTO schedule (service, from_chat_id, message_id, target_chat_id, msg_text, publish_time) VALUES (?, ?, ?, ?, ?, ?)',
-            (service, from_chat, msg_id, target, text, pub_time),
+            'INSERT INTO schedule (service, from_chat_id, message_id, target_chat_id, msg_text, attachments, publish_time) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (service, from_chat, msg_id, target, text, json.dumps(attachments or []), pub_time),
+
         )
         self.db.commit()
         logging.info('Scheduled %s to %s at %s', service, target, pub_time)
@@ -672,6 +725,9 @@ class Bot:
                     data.get('target'),
                     pub_time_utc.isoformat(),
                     data.get('msg_text'),
+
+                    data.get('attachments'),
+
                 )
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
@@ -683,12 +739,16 @@ class Bot:
         if 'forward_from_chat' in message and self.is_authorized(user_id):
             from_chat = message['forward_from_chat']['id']
             msg_id = message['forward_from_message_id']
+
+            attachments = []
+            if 'photo' in message:
+                attachments = [p['file_id'] for p in message['photo']]
             self.pending[user_id] = {
                 'from_chat_id': from_chat,
                 'message_id': msg_id,
-
                 'msg_text': message.get('text')
                 or message.get('caption', ''),
+                'attachments': attachments,
 
             }
             keyboard = {
@@ -761,6 +821,9 @@ class Bot:
                 'message_id': info.get('message_id'),
                 'target_chat_id': info.get('target'),
                 'msg_text': info.get('msg_text'),
+
+                'attachments': info.get('attachments'),
+
                 'id': None,
             })
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'Sent'})

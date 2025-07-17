@@ -6,7 +6,7 @@ This bot allows authorized users to schedule posts to their Telegram channels or
 - User authorization with superadmin.
 - Channel tracking where bot is admin.
 
-- Schedule message forwarding to Telegram channels or posting to VK groups. The bot forwards the original post so views and custom emoji are preserved in Telegram, while the post caption is sent as text to VK.
+- Schedule message forwarding to Telegram channels or posting to VK groups. The bot forwards the original post so views and custom emoji are preserved in Telegram, while the post caption is sent as text and photos are uploaded to VK.
 
 - If forwarding fails (e.g., bot not in source), the message is copied instead.
 - View posting history.
@@ -29,7 +29,8 @@ This bot allows authorized users to schedule posts to their Telegram channels or
 - /scheduled - show scheduled posts with target channel names
 - /history - recent posts
 - /tz <offset> - set timezone offset (e.g., +02:00)
-- Forward a post to the bot, choose Telegram or VK, then select a channel/group and time or "Now" to publish. VK posts use the caption of the forwarded message as their text.
+
+- Forward a post to the bot, choose Telegram or VK, then select a channel/group and time or "Now" to publish. VK posts use the caption of the forwarded message as their text and include any photos.
 
 
 ## User Stories

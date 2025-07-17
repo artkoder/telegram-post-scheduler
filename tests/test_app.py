@@ -398,3 +398,87 @@ async def test_vk_post_uses_caption(tmp_path):
 
     await bot.close()
 
+
+
+@pytest.mark.asyncio
+async def test_vk_post_with_photo(tmp_path):
+    os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
+    os.environ["VK_TOKEN"] = "token"
+    bot = Bot("dummy", os.environ["DB_PATH"])
+
+    calls = []
+
+    async def dummy_vk(method, params=None):
+        calls.append((method, params))
+        if method == "groups.get":
+            return {"response": {"items": []}}
+        if method == "photos.getWallUploadServer":
+            return {"response": {"upload_url": "http://upload"}}
+        if method == "photos.saveWallPhoto":
+            return {"response": [{"id": 1, "owner_id": 2}]}
+        return {"response": {"post_id": 1}}
+
+    async def dummy_api(method, data=None):
+        if method == "getFile":
+            return {"ok": True, "result": {"file_path": "path"}}
+        return {"ok": True}
+
+    async def dummy_upload(url, data):
+        return {"photo": "p", "server": 1, "hash": "h"}
+
+    bot.vk_request = dummy_vk  # type: ignore
+    bot.api_request = dummy_api  # type: ignore
+    bot.vk_upload = dummy_upload  # type: ignore
+    bot.db.execute("INSERT INTO vk_groups (group_id, name) VALUES (111, 'G')")
+    bot.db.commit()
+    await bot.start()
+    real_session = bot.session
+
+    class DummyResponse:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+    class DummyGet(DummyResponse):
+        async def read(self):
+            return b"data"
+
+    class DummyPost(DummyResponse):
+        async def text(self):
+            return "{}"
+
+    class DummySession:
+        def get(self, url):
+            return DummyGet()
+
+        def post(self, url, data=None):
+            return DummyPost()
+
+        async def close(self):
+            pass
+
+    bot.session = DummySession()
+    await real_session.close()
+
+    await bot.handle_update({"message": {"text": "/start", "from": {"id": 1}}})
+
+    await bot.handle_update({
+        "message": {
+            "forward_from_chat": {"id": 500},
+            "forward_from_message_id": 7,
+            "caption": "hello",
+            "photo": [{"file_id": "abc"}],
+            "from": {"id": 1}
+        }
+    })
+    await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "svc:vk", "id": "q"}})
+    await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "vkgrp:111", "id": "q"}})
+    await bot.handle_update({"callback_query": {"from": {"id": 1}, "data": "sendnow", "id": "q"}})
+
+    assert ("photos.getWallUploadServer", {"group_id": 111}) in calls
+    assert any(c[0] == "wall.post" and "attachments" in c[1] for c in calls)
+
+    await bot.close()
+
