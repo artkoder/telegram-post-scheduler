@@ -22,7 +22,9 @@ This bot allows authorized users to schedule posts to their Telegram channels or
 - /remove_user <id> - remove user
 - /channels - list Telegram channels (admin)
 - /vkgroups - list connected VK groups (admin)
+
 - /refresh_vkgroups - reload VK groups using current token (admin)
+
 - /scheduled - show scheduled posts with target channel names
 - /history - recent posts
 - /tz <offset> - set timezone offset (e.g., +02:00)
@@ -56,7 +58,9 @@ For Telegram to reach the webhook over HTTPS, the Fly.io service must expose por
 - `WEBHOOK_URL` – external HTTPS URL of the deployed application. Used to register the Telegram webhook.
 
 - `DB_PATH` – path to the SQLite database (default `/data/bot.db`).
+
 - `VK_TOKEN` – user access token for posting to VK. It requires `wall` and `groups` permissions, and the user must be an admin of the communities. The bot loads accessible groups at startup or via `/refresh_vkgroups`. Use that command from a superadmin to refresh without restart.
+
 - `FLY_API_TOKEN` – token for automated Fly deployments.
 - `TZ_OFFSET` – default timezone offset like `+02:00`.
 - `SCHED_INTERVAL_SEC` – scheduler check interval in seconds (default `30`).

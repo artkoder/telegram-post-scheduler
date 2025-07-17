@@ -515,6 +515,7 @@ class Bot:
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No groups'})
             return
 
+
         if text.startswith('/refresh_vkgroups') and self.is_superadmin(user_id):
             await self.load_vk_groups()
             cur = self.db.execute('SELECT group_id, name FROM vk_groups')
@@ -522,6 +523,7 @@ class Bot:
             msg = '\n'.join(f"{r['name']} ({r['group_id']})" for r in rows)
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No groups'})
             return
+
 
         if text.startswith('/history'):
             cur = self.db.execute(
