@@ -323,6 +323,7 @@ async def test_refresh_vk_groups(tmp_path):
     await bot.close()
 
 
+
 @pytest.mark.asyncio
 async def test_vk_group_token(tmp_path):
     os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
@@ -355,3 +356,4 @@ async def test_vk_group_token(tmp_path):
     assert ("groups.getById", {"group_id": "777"}) in calls
 
     await bot.close()
+

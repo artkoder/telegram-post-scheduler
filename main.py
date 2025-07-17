@@ -63,7 +63,9 @@ class Bot:
             self.db.execute(stmt)
         self.db.commit()
         self.vk_token = os.getenv("VK_TOKEN")
+
         self.vk_group_id = os.getenv("VK_GROUP_ID")
+
         # ensure new columns exist when upgrading
         for table, column in (
             ("users", "username"),
@@ -178,6 +180,7 @@ class Bot:
         if not self.vk_token:
             return
 
+
         groups: list[dict] = []
         resp = await self.vk_request("groups.get", {"extended": 1, "filter": "admin"})
         if "response" in resp:
@@ -198,6 +201,7 @@ class Bot:
             self.db.execute(
                 "INSERT OR REPLACE INTO vk_groups (group_id, name) VALUES (?, ?)",
                 (g.get("id") or g.get("group_id"), g.get("name", "")),
+
             )
         self.db.commit()
 
@@ -531,6 +535,7 @@ class Bot:
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No groups'})
             return
 
+
         if text.startswith('/refresh_vkgroups') and self.is_superadmin(user_id):
             await self.load_vk_groups()
             cur = self.db.execute('SELECT group_id, name FROM vk_groups')
@@ -538,6 +543,7 @@ class Bot:
             msg = '\n'.join(f"{r['name']} ({r['group_id']})" for r in rows)
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No groups'})
             return
+
 
         if text.startswith('/history'):
             cur = self.db.execute(
