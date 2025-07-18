@@ -323,6 +323,7 @@ async def test_refresh_vk_groups(tmp_path):
     await bot.close()
 
 
+
 @pytest.mark.asyncio
 async def test_vk_group_token(tmp_path):
     os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
@@ -355,6 +356,7 @@ async def test_vk_group_token(tmp_path):
     assert ("groups.getById", {"group_id": "777"}) in calls
 
     await bot.close()
+
 
 
 @pytest.mark.asyncio
@@ -480,6 +482,7 @@ async def test_vk_post_with_photo(tmp_path):
     await bot.close()
 
 
+
 @pytest.mark.asyncio
 async def test_vk_group_token_no_photo(tmp_path):
     os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
@@ -557,3 +560,4 @@ async def test_vk_group_token_no_photo(tmp_path):
     assert any(c[0] == "wall.post" and "attachments" not in c[1] for c in calls)
 
     await bot.close()
+

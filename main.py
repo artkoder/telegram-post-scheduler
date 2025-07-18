@@ -43,7 +43,9 @@ CREATE_TABLES = [
             message_id INTEGER,
             target_chat_id INTEGER,
             msg_text TEXT,
+
             attachments TEXT,
+
             publish_time TEXT,
             sent INTEGER DEFAULT 0,
             sent_at TEXT
@@ -65,7 +67,9 @@ class Bot:
             self.db.execute(stmt)
         self.db.commit()
         self.vk_token = os.getenv("VK_TOKEN")
+
         self.vk_group_id = os.getenv("VK_GROUP_ID")
+
         # ensure new columns exist when upgrading
         for table, column in (
             ("users", "username"),
@@ -74,7 +78,9 @@ class Bot:
             ("rejected_users", "username"),
             ("schedule", "service"),
             ("schedule", "msg_text"),
+
             ("schedule", "attachments"),
+
         ):
             cur = self.db.execute(f"PRAGMA table_info({table})")
             names = [r[1] for r in cur.fetchall()]
@@ -112,6 +118,7 @@ class Bot:
                     logging.error("Failed to publish telegram message: %s", resp)
                     return False
             else:
+
                 msg = (
                     row.get("msg_text", "")
                     if isinstance(row, dict)
@@ -119,6 +126,7 @@ class Bot:
                 )
                 if not msg:
                     msg = "Forwarded from Telegram"
+
                 attachments = []
                 attach_list = row.get("attachments") if isinstance(row, dict) else row["attachments"]
                 if attach_list:
@@ -135,6 +143,7 @@ class Bot:
                         ) as resp:
                             data = await resp.read()
                         # upload to VK
+
                         up = await self.vk_request(
                             "photos.getWallUploadServer",
                             {"group_id": row["target_chat_id"]},
@@ -145,6 +154,7 @@ class Bot:
                             )
                             attachments = []
                             break
+
                         url = up.get("response", {}).get("upload_url")
                         if not url:
                             continue
@@ -169,6 +179,7 @@ class Bot:
                 if attachments:
                     params["attachments"] = ",".join(attachments)
                 resp = await self.vk_request("wall.post", params)
+
                 if "response" not in resp:
                     logging.error("Failed to publish VK message: %s", resp)
                     return False
@@ -226,6 +237,7 @@ class Bot:
                 logging.info("VK call %s succeeded", method)
             return result
 
+
     async def vk_upload(self, url: str, data: bytes) -> dict:
         async with self.session.post(url, data={"photo": data}) as resp:
             text = await resp.text()
@@ -235,9 +247,11 @@ class Bot:
                 logging.exception("Invalid VK upload response: %s", text)
                 return {}
 
+
     async def load_vk_groups(self):
         if not self.vk_token:
             return
+
 
         groups: list[dict] = []
         resp = await self.vk_request("groups.get", {"extended": 1, "filter": "admin"})
@@ -259,6 +273,7 @@ class Bot:
             self.db.execute(
                 "INSERT OR REPLACE INTO vk_groups (group_id, name) VALUES (?, ?)",
                 (g.get("id") or g.get("group_id"), g.get("name", "")),
+
             )
         self.db.commit()
 
@@ -351,11 +366,13 @@ class Bot:
         target: int,
         pub_time: str,
         text: str | None = None,
+
         attachments: list[str] | None = None,
     ):
         self.db.execute(
             'INSERT INTO schedule (service, from_chat_id, message_id, target_chat_id, msg_text, attachments, publish_time) VALUES (?, ?, ?, ?, ?, ?, ?)',
             (service, from_chat, msg_id, target, text, json.dumps(attachments or []), pub_time),
+
         )
         self.db.commit()
         logging.info('Scheduled %s to %s at %s', service, target, pub_time)
@@ -601,6 +618,7 @@ class Bot:
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': msg or 'No groups'})
             return
 
+
         if text.startswith('/history'):
             cur = self.db.execute(
                 'SELECT target_chat_id, sent_at FROM schedule WHERE sent=1 ORDER BY sent_at DESC LIMIT 10'
@@ -718,7 +736,9 @@ class Bot:
                     data.get('target'),
                     pub_time_utc.isoformat(),
                     data.get('msg_text'),
+
                     data.get('attachments'),
+
                 )
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
@@ -730,6 +750,7 @@ class Bot:
         if 'forward_from_chat' in message and self.is_authorized(user_id):
             from_chat = message['forward_from_chat']['id']
             msg_id = message['forward_from_message_id']
+
             attachments = []
             if 'photo' in message:
                 attachments = [p['file_id'] for p in message['photo']]
@@ -739,6 +760,7 @@ class Bot:
                 'msg_text': message.get('text')
                 or message.get('caption', ''),
                 'attachments': attachments,
+
             }
             keyboard = {
                 'inline_keyboard': [[
@@ -810,7 +832,9 @@ class Bot:
                 'message_id': info.get('message_id'),
                 'target_chat_id': info.get('target'),
                 'msg_text': info.get('msg_text'),
+
                 'attachments': info.get('attachments'),
+
                 'id': None,
             })
             await self.api_request('sendMessage', {'chat_id': user_id, 'text': 'Sent'})
