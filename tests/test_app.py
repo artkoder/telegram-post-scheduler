@@ -399,7 +399,6 @@ async def test_vk_post_uses_caption(tmp_path):
     await bot.close()
 
 
-
 @pytest.mark.asyncio
 async def test_vk_post_with_photo(tmp_path):
     os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")

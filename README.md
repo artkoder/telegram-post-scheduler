@@ -31,8 +31,6 @@ This bot allows authorized users to schedule posts to their Telegram channels or
 - /tz <offset> - set timezone offset (e.g., +02:00)
 - Forward a post to the bot, choose Telegram or VK, then select a channel/group and time or "Now" to publish. VK posts use the caption of the forwarded message as their text and include any photos.
 
-- Forward a post to the bot, choose Telegram or VK, then select a channel/group and time or "Now" to publish. VK posts use the caption of the forwarded message as their text and include any photos.
-
 
 ## User Stories
 
@@ -63,7 +61,8 @@ For Telegram to reach the webhook over HTTPS, the Fly.io service must expose por
 
 - `DB_PATH` – path to the SQLite database (default `/data/bot.db`).
 
-- `VK_TOKEN` – user or community access token for posting to VK. When using a community token, set `VK_GROUP_ID` to the numeric group id. User tokens require `wall`, `groups` and `photos` permissions and must be admins of the communities. Photo uploads only work with user tokens; community tokens can post text only. The bot loads accessible groups at startup or via `/refresh_vkgroups`.
+- `VK_TOKEN` – user or community access token for posting to VK. When using a community token, set `VK_GROUP_ID` to the numeric group id. User tokens require `wall`, `groups` and `photos` permissions and must be admins of the communities. Photo uploads only work with **user** tokens; community tokens can post text only. The bot loads accessible groups at startup or via `/refresh_vkgroups`.
+  Even if a community token has the `photos` scope, the VK API does not allow calling `photos.getWallUploadServer` with group authorization, so photo attachments will be skipped.
 - `VK_GROUP_ID` – id of the VK community if using a group access token.
 
 - `FLY_API_TOKEN` – token for automated Fly deployments.
