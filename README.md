@@ -64,6 +64,7 @@ For Telegram to reach the webhook over HTTPS, the Fly.io service must expose por
 - `VK_TOKEN` – user or community access token for posting to VK. When using a community token, set `VK_GROUP_ID` to the numeric group id. User tokens require `wall`, `groups` and `photos` permissions and must be admins of the communities. Photo uploads only work with **user** tokens; community tokens can post text only. The bot loads accessible groups at startup or via `/refresh_vkgroups`.
   Even if a community token has the `photos` scope, the VK API does not allow calling `photos.getWallUploadServer` with group authorization, so photo attachments will be skipped.
 - `VK_GROUP_ID` – id of the VK community if using a group access token.
+- `VK_USER_TOKEN` – optional user access token. If set alongside a community token in `VK_TOKEN`, the bot will automatically retry API calls that fail with error 27 using this user token. This allows posting with a community token while delegating unsupported methods (such as `wall.edit` or photo uploads) to the user token.
 
 - `FLY_API_TOKEN` – token for automated Fly deployments.
 - `TZ_OFFSET` – default timezone offset like `+02:00`.

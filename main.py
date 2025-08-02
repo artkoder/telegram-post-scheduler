@@ -67,6 +67,7 @@ class Bot:
             self.db.execute(stmt)
         self.db.commit()
         self.vk_token = os.getenv("VK_TOKEN")
+        self.vk_user_token = os.getenv("VK_USER_TOKEN")
 
         self.vk_group_id = os.getenv("VK_GROUP_ID")
 
@@ -148,7 +149,7 @@ class Bot:
                             "photos.getWallUploadServer",
                             {"group_id": row["target_chat_id"]},
                         )
-                        if "error" in up and up["error"].get("error_code") == 27:
+                        if "error" in up:
                             logging.warning(
                                 "Photo uploads require a user VK token; skipping attachments"
                             )
@@ -217,13 +218,18 @@ class Bot:
                 logging.info("API call %s succeeded", method)
             return result
 
-    async def vk_request(self, method: str, params: dict | None = None):
-        """Call VK API if token configured."""
-        if not self.vk_token:
+    async def vk_request(self, method: str, params: dict | None = None, *, use_user: bool = False):
+        """Call VK API if token configured.
+
+        If a user token is configured and the request fails with error 27
+        (group authorization failed), the call is retried with the user token.
+        """
+        token = self.vk_user_token if use_user and self.vk_user_token else self.vk_token
+        if not token:
             return {}
-        params = params or {}
-        params.setdefault("access_token", self.vk_token)
+        params = dict(params or {})
         params.setdefault("v", "5.131")
+        params["access_token"] = token
         async with self.session.post(f"https://api.vk.com/method/{method}", data=params) as resp:
             text = await resp.text()
             try:
@@ -232,6 +238,10 @@ class Bot:
                 logging.exception("Invalid VK response for %s: %s", method, text)
                 return {}
             if "error" in result:
+                if result["error"].get("error_code") == 27 and not use_user and self.vk_user_token:
+                    logging.warning("VK call %s failed with group auth; retrying with user token", method)
+                    params.pop("access_token", None)
+                    return await self.vk_request(method, params, use_user=True)
                 logging.error("VK call %s failed: %s", method, result)
             else:
                 logging.info("VK call %s succeeded", method)
