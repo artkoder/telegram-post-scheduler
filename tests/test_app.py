@@ -297,12 +297,13 @@ async def test_scheduler_process_due(tmp_path):
 async def test_refresh_vk_groups(tmp_path):
     os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
     os.environ["VK_TOKEN"] = "token"
+    os.environ.pop("VK_USER_TOKEN", None)
     bot = Bot("dummy", os.environ["DB_PATH"])
 
     async def dummy_api(method, data=None):
         return {"ok": True}
 
-    async def dummy_vk(method, params=None):
+    async def dummy_vk(method, params=None, use_user=False):
         return {"response": {"items": [{"id": 123, "name": "Test Group"}]}}
 
     bot.api_request = dummy_api  # type: ignore
@@ -328,12 +329,13 @@ async def test_refresh_vk_groups(tmp_path):
 async def test_vk_group_token(tmp_path):
     os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
     os.environ["VK_TOKEN"] = "token"
+    os.environ.pop("VK_USER_TOKEN", None)
     os.environ["VK_GROUP_ID"] = "777"
     bot = Bot("dummy", os.environ["DB_PATH"])
 
     calls = []
 
-    async def dummy_vk(method, params=None):
+    async def dummy_vk(method, params=None, use_user=False):
         calls.append((method, params))
         if method == "groups.get":
             return {"error": {"error_code": 27}}
@@ -363,11 +365,12 @@ async def test_vk_group_token(tmp_path):
 async def test_vk_post_uses_caption(tmp_path):
     os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
     os.environ["VK_TOKEN"] = "token"
+    os.environ.pop("VK_USER_TOKEN", None)
     bot = Bot("dummy", os.environ["DB_PATH"])
 
     calls = []
 
-    async def dummy_vk(method, params=None):
+    async def dummy_vk(method, params=None, use_user=False):
         calls.append((method, params))
         return {"response": {"post_id": 1}}
 
@@ -403,11 +406,12 @@ async def test_vk_post_uses_caption(tmp_path):
 async def test_vk_post_with_photo(tmp_path):
     os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
     os.environ["VK_TOKEN"] = "token"
+    os.environ.pop("VK_USER_TOKEN", None)
     bot = Bot("dummy", os.environ["DB_PATH"])
 
     calls = []
 
-    async def dummy_vk(method, params=None):
+    async def dummy_vk(method, params=None, use_user=False):
         calls.append((method, params))
         if method == "groups.get":
             return {"response": {"items": []}}
@@ -488,11 +492,12 @@ async def test_vk_group_token_no_photo(tmp_path):
     os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
     os.environ["VK_TOKEN"] = "token"
     os.environ["VK_GROUP_ID"] = "111"
+    os.environ.pop("VK_USER_TOKEN", None)
     bot = Bot("dummy", os.environ["DB_PATH"])
 
     calls = []
 
-    async def dummy_vk(method, params=None):
+    async def dummy_vk(method, params=None, use_user=False):
         calls.append((method, params))
         if method == "groups.get":
             return {"error": {"error_code": 27}}
@@ -560,4 +565,49 @@ async def test_vk_group_token_no_photo(tmp_path):
     assert any(c[0] == "wall.post" and "attachments" not in c[1] for c in calls)
 
     await bot.close()
+
+
+@pytest.mark.asyncio
+async def test_vk_request_user_token_fallback(tmp_path):
+    os.environ["DB_PATH"] = str(tmp_path / "db.sqlite")
+    os.environ["VK_TOKEN"] = "group"
+    os.environ["VK_USER_TOKEN"] = "user"
+    bot = Bot("dummy", os.environ["DB_PATH"])
+
+    class DummyResp:
+        def __init__(self, data):
+            self.data = data
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+        async def text(self):
+            import json
+            return json.dumps(self.data)
+
+    class DummySession:
+        def __init__(self):
+            self.calls = []
+
+        def post(self, url, data=None):
+            self.calls.append(data.get("access_token"))
+            if len(self.calls) == 1:
+                return DummyResp({"error": {"error_code": 27}})
+            return DummyResp({"response": {}})
+
+        async def close(self):
+            pass
+
+    bot.session = DummySession()
+
+    resp = await bot.vk_request("wall.edit", {})
+    assert "response" in resp
+    assert bot.session.calls == ["group", "user"]
+
+    await bot.close()
+    os.environ.pop("VK_TOKEN", None)
+    os.environ.pop("VK_USER_TOKEN", None)
 
