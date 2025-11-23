@@ -2,7 +2,10 @@ import asyncio
 import json
 import logging
 import os
+import shlex
 import sqlite3
+import subprocess
+import sys
 from datetime import datetime, date, timedelta, timezone
 import contextlib
 
@@ -14,6 +17,41 @@ DB_PATH = os.getenv("DB_PATH", "/data/bot.db")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://telegram-post-scheduler.fly.dev")
 TZ_OFFSET = os.getenv("TZ_OFFSET", "+00:00")
 SCHED_INTERVAL_SEC = int(os.getenv("SCHED_INTERVAL_SEC", "30"))
+
+MAX_KAGGLE_OUTPUT = 4000
+
+
+def ensure_kaggle_library() -> bool:
+    """Try to import kaggle and install it if missing."""
+
+    try:
+        import kaggle  # type: ignore
+
+        logging.info("Kaggle library already available")
+        return True
+    except ImportError:
+        logging.info("Kaggle library not found, attempting installation")
+    except Exception:
+        logging.exception("Unexpected error while importing kaggle")
+        return False
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "kaggle"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            logging.error("Failed to install kaggle: %s", result.stderr)
+            return False
+        import kaggle  # type: ignore  # noqa: F401
+
+        logging.info("Kaggle library installed successfully")
+        return True
+    except Exception:
+        logging.exception("Error installing or importing kaggle")
+        return False
 
 CREATE_TABLES = [
     """CREATE TABLE IF NOT EXISTS users (
@@ -69,6 +107,8 @@ class Bot:
         self.vk_token = os.getenv("VK_TOKEN")
 
         self.vk_group_id = os.getenv("VK_GROUP_ID")
+        self.kaggle_available = False
+        self.kaggle_mode: set[int] = set()
 
         # ensure new columns exist when upgrading
         for table, column in (
@@ -419,6 +459,44 @@ class Bot:
         text = message.get('text', '')
         user_id = message['from']['id']
         username = message['from'].get('username')
+
+        if text.startswith('/kaggle'):
+            if not self.is_superadmin(user_id):
+                await self.api_request('sendMessage', {
+                    'chat_id': user_id,
+                    'text': 'У вас нет прав для использования Kaggle-терминала.'
+                })
+                return
+            if not self.kaggle_available:
+                await self.api_request('sendMessage', {
+                    'chat_id': user_id,
+                    'text': 'Библиотека kaggle недоступна. Обратитесь к администратору сервера.'
+                })
+                return
+            self.kaggle_mode.add(user_id)
+            await self.api_request('sendMessage', {
+                'chat_id': user_id,
+                'text': 'Kaggle Terminal [ON]. Библиотека готова. Жду команды.'
+            })
+            return
+
+        if text.startswith('/exit'):
+            if not self.is_superadmin(user_id):
+                await self.api_request('sendMessage', {
+                    'chat_id': user_id,
+                    'text': 'У вас нет прав для использования Kaggle-терминала.'
+                })
+                return
+            self.kaggle_mode.discard(user_id)
+            await self.api_request('sendMessage', {
+                'chat_id': user_id,
+                'text': 'Kaggle Terminal [OFF].'
+            })
+            return
+
+        if user_id in self.kaggle_mode and self.is_superadmin(user_id):
+            await self.handle_kaggle_command(user_id, text)
+            return
 
         # first /start registers superadmin or puts user in queue
         if text.startswith('/start'):
@@ -786,6 +864,53 @@ class Bot:
                     'text': 'Please forward a post from a channel'
                 })
 
+    async def handle_kaggle_command(self, user_id: int, text: str):
+        if not self.kaggle_available:
+            await self.api_request('sendMessage', {
+                'chat_id': user_id,
+                'text': 'Библиотека kaggle недоступна. Обратитесь к администратору сервера.'
+            })
+            return
+
+        cmd_text = text.strip()
+        if not cmd_text:
+            await self.api_request('sendMessage', {
+                'chat_id': user_id,
+                'text': 'Пустая команда. Введите аргументы для kaggle.'
+            })
+            return
+
+        args = ["kaggle"] + shlex.split(cmd_text)
+        logging.info("Kaggle command from %s: %s", user_id, args)
+
+        try:
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=os.environ,
+            )
+            output = (result.stdout or '').strip()
+            error_output = (result.stderr or '').strip()
+            content = output if output else error_output
+            if not content:
+                content = 'Command completed with no output.'
+        except subprocess.TimeoutExpired:
+            content = 'Timeout'
+        except Exception as exc:
+            content = f'Error: {exc}'
+
+        if len(content) > MAX_KAGGLE_OUTPUT:
+            content = content[:MAX_KAGGLE_OUTPUT] + "\n…(output truncated)"
+
+        msg = f"```text\n{content}\n```"
+        await self.api_request('sendMessage', {
+            'chat_id': user_id,
+            'text': msg,
+            'parse_mode': 'Markdown'
+        })
+
     async def handle_callback(self, query):
         user_id = query['from']['id']
         data = query['data']
@@ -958,6 +1083,8 @@ def create_app():
     async def start_background(app: web.Application):
         logging.info("Application startup")
         try:
+            loop = asyncio.get_running_loop()
+            bot.kaggle_available = await loop.run_in_executor(None, ensure_kaggle_library)
             await bot.start()
             await ensure_webhook(bot, webhook_base)
         except Exception:
