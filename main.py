@@ -22,35 +22,15 @@ MAX_KAGGLE_OUTPUT = 4000
 
 
 def ensure_kaggle_library() -> bool:
-    """Try to import kaggle and install it if missing."""
+    """Attempt to import kaggle at startup without crashing the app."""
 
     try:
-        import kaggle  # type: ignore
-
-        logging.info("Kaggle library already available")
-        return True
-    except ImportError:
-        logging.info("Kaggle library not found, attempting installation")
-    except Exception:
-        logging.exception("Unexpected error while importing kaggle")
-        return False
-
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "kaggle"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            logging.error("Failed to install kaggle: %s", result.stderr)
-            return False
         import kaggle  # type: ignore  # noqa: F401
 
-        logging.info("Kaggle library installed successfully")
+        logging.info("Kaggle library import OK at startup")
         return True
     except Exception:
-        logging.exception("Error installing or importing kaggle")
+        logging.exception("Kaggle library import FAILED at startup")
         return False
 
 CREATE_TABLES = [
@@ -474,6 +454,7 @@ class Bot:
                 })
                 return
             self.kaggle_mode.add(user_id)
+            logging.info("User %s entered kaggle_mode", user_id)
             await self.api_request('sendMessage', {
                 'chat_id': user_id,
                 'text': 'Kaggle Terminal [ON]. Библиотека готова. Жду команды.'
@@ -488,6 +469,7 @@ class Bot:
                 })
                 return
             self.kaggle_mode.discard(user_id)
+            logging.info("User %s exited kaggle_mode", user_id)
             await self.api_request('sendMessage', {
                 'chat_id': user_id,
                 'text': 'Kaggle Terminal [OFF].'
@@ -897,8 +879,10 @@ class Bot:
             if not content:
                 content = 'Command completed with no output.'
         except subprocess.TimeoutExpired:
+            logging.warning("Kaggle command timeout for user %s: %s", user_id, args)
             content = 'Timeout'
         except Exception as exc:
+            logging.exception("Kaggle command failed for user %s: %s", user_id, args)
             content = f'Error: {exc}'
 
         if len(content) > MAX_KAGGLE_OUTPUT:
