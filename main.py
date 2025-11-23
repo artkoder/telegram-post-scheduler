@@ -87,7 +87,9 @@ class Bot:
         self.vk_token = os.getenv("VK_TOKEN")
 
         self.vk_group_id = os.getenv("VK_GROUP_ID")
-        self.kaggle_available = False
+        # Kaggle CLI support: по умолчанию считаем, что доступен.
+        # Если его нет, ошибки проявятся при запуске команды.
+        self.kaggle_available = True
         self.kaggle_mode: set[int] = set()
 
         # ensure new columns exist when upgrading
@@ -445,12 +447,6 @@ class Bot:
                 await self.api_request('sendMessage', {
                     'chat_id': user_id,
                     'text': 'У вас нет прав для использования Kaggle-терминала.'
-                })
-                return
-            if not self.kaggle_available:
-                await self.api_request('sendMessage', {
-                    'chat_id': user_id,
-                    'text': 'Библиотека kaggle недоступна. Обратитесь к администратору сервера.'
                 })
                 return
             self.kaggle_mode.add(user_id)
@@ -847,13 +843,6 @@ class Bot:
                 })
 
     async def handle_kaggle_command(self, user_id: int, text: str):
-        if not self.kaggle_available:
-            await self.api_request('sendMessage', {
-                'chat_id': user_id,
-                'text': 'Библиотека kaggle недоступна. Обратитесь к администратору сервера.'
-            })
-            return
-
         cmd_text = text.strip()
         if not cmd_text:
             await self.api_request('sendMessage', {
@@ -1068,7 +1057,9 @@ def create_app():
         logging.info("Application startup")
         try:
             loop = asyncio.get_running_loop()
-            bot.kaggle_available = await loop.run_in_executor(None, ensure_kaggle_library)
+            # Пробуем импортировать kaggle только ради логов,
+            # но не блокируем работу бота, если импорт не удался.
+            await loop.run_in_executor(None, ensure_kaggle_library)
             await bot.start()
             await ensure_webhook(bot, webhook_base)
         except Exception:
